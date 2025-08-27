@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { supabase } from "@/lib/supabase"
+import type { Database } from "@/lib/database.types"
 import {
   Search,
   Bell,
@@ -78,13 +80,7 @@ const chartData = [
   { name: "Sun", focusHours: 3.8, efficiency: 72, sessions: 7 },
 ]
 
-const recentSessions = [
-  { task: "Project Planning", duration: "50 min", efficiency: 92, time: "2 hours ago" },
-  { task: "Code Review", duration: "25 min", efficiency: 88, time: "3 hours ago" },
-  { task: "Design Work", duration: "50 min", efficiency: 95, time: "4 hours ago" },
-  { task: "Email Processing", duration: "25 min", efficiency: 78, time: "5 hours ago" },
-  { task: "Research", duration: "50 min", efficiency: 85, time: "6 hours ago" },
-]
+type Session = Database['public']['Tables']['sessions']['Row']
 
 export default function ProductivityDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState("This Week")
@@ -93,6 +89,8 @@ export default function ProductivityDashboard() {
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [currentTask, setCurrentTask] = useState("Focus Session")
   const [isDarkMode, setIsDarkMode] = useState(false)
+  const [recentSessions, setRecentSessions] = useState<Session[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (isDarkMode) {
@@ -101,6 +99,27 @@ export default function ProductivityDashboard() {
       document.documentElement.classList.remove("dark")
     }
   }, [isDarkMode])
+
+  useEffect(() => {
+    async function fetchRecentSessions() {
+      try {
+        const { data, error } = await supabase
+          .from('sessions')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(5)
+        
+        if (error) throw error
+        setRecentSessions(data || [])
+      } catch (error) {
+        console.error('Error fetching sessions:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchRecentSessions()
+  }, [])
 
   const startTimer = () => setIsTimerRunning(true)
   const pauseTimer = () => setIsTimerRunning(false)
@@ -448,22 +467,32 @@ export default function ProductivityDashboard() {
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="space-y-0">
-                    {recentSessions.map((session, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
-                      >
-                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
-                            {session.task}
-                          </div>
-                          <div className="text-xs text-gray-600 dark:text-gray-400">
-                            {session.duration} • {session.efficiency}% efficiency • {session.time}
+                    {loading ? (
+                      <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                        Loading sessions...
+                      </div>
+                    ) : recentSessions.length === 0 ? (
+                      <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                        No sessions yet. Start your first focus session!
+                      </div>
+                    ) : (
+                      recentSessions.map((session, index) => (
+                        <div
+                          key={session.id}
+                          className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                        >
+                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                              {session.task}
+                            </div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">
+                              {session.duration_minutes} min • {session.efficiency_percentage}% efficiency • {new Date(session.created_at).toLocaleDateString()}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
