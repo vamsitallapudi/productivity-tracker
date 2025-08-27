@@ -15,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <style>{`
 html {
@@ -24,6 +24,20 @@ html {
   --font-mono: ${GeistMono.variable};
 }
         `}</style>
+        <script dangerouslySetInnerHTML={{ __html: `
+          (function(){
+            try {
+              var KEY = 'themeV1';
+              var t = localStorage.getItem(KEY);
+              if (t === 'dark' || t === 'light') {
+                document.documentElement.classList.toggle('dark', t === 'dark');
+              } else {
+                var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.classList.toggle('dark', prefersDark);
+              }
+            } catch (e) {}
+          })();
+        ` }} />
       </head>
       <body>{children}</body>
     </html>

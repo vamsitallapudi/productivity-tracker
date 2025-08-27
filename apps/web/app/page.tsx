@@ -185,15 +185,76 @@ const filterSessionsByPeriod = (sessions: Session[], period: string) => {
   }
 }
 
-const chartData = [
-  { name: "Mon", focusHours: 7.2, efficiency: 85, sessions: 14 },
-  { name: "Tue", focusHours: 6.8, efficiency: 82, sessions: 12 },
-  { name: "Wed", focusHours: 8.1, efficiency: 91, sessions: 16 },
-  { name: "Thu", focusHours: 5.9, efficiency: 78, sessions: 11 },
-  { name: "Fri", focusHours: 7.5, efficiency: 88, sessions: 15 },
-  { name: "Sat", focusHours: 4.2, efficiency: 75, sessions: 8 },
-  { name: "Sun", focusHours: 3.8, efficiency: 72, sessions: 7 },
-]
+// Build trend data for AreaChart from filtered sessions
+const calculateTrendData = (sessions: Session[], period: string) => {
+  const now = new Date()
+
+  if (period === 'Today') {
+    // X-axis: hours (0-23)
+    const buckets: { totalMinutes: number; effSum: number; count: number }[] = Array.from({ length: 24 }, () => ({ totalMinutes: 0, effSum: 0, count: 0 }))
+    sessions.forEach(s => {
+      const d = new Date(s.created_at)
+      const h = d.getHours()
+      buckets[h].totalMinutes += s.duration_minutes
+      buckets[h].effSum += s.efficiency_percentage
+      buckets[h].count += 1
+    })
+    return buckets.map((b, h) => ({
+      name: String(h),
+      focusHours: Math.round((b.totalMinutes / 60) * 10) / 10,
+      efficiency: b.count > 0 ? Math.round(b.effSum / b.count) : 0,
+      sessions: b.count,
+    }))
+  }
+
+  if (period === 'This Week') {
+    // X-axis: days (Sun..Sat)
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    const buckets: { totalMinutes: number; effSum: number; count: number }[] = Array.from({ length: 7 }, () => ({ totalMinutes: 0, effSum: 0, count: 0 }))
+    sessions.forEach(s => {
+      const d = new Date(s.created_at)
+      const idx = d.getDay()
+      buckets[idx].totalMinutes += s.duration_minutes
+      buckets[idx].effSum += s.efficiency_percentage
+      buckets[idx].count += 1
+    })
+    return buckets.map((b, i) => ({
+      name: dayNames[i],
+      focusHours: Math.round((b.totalMinutes / 60) * 10) / 10,
+      efficiency: b.count > 0 ? Math.round(b.effSum / b.count) : 0,
+      sessions: b.count,
+    }))
+  }
+
+  // This Month -> X-axis: weeks within the month (W1..W5/W6), weeks start Sunday
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+  const weeksInMonth = (() => {
+    const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+    // Max 6 buckets to cover offset + days
+    return 6
+  })()
+  const buckets: { totalMinutes: number; effSum: number; count: number }[] = Array.from({ length: weeksInMonth }, () => ({ totalMinutes: 0, effSum: 0, count: 0 }))
+
+  const getWeekIndexInMonth = (d: Date) => {
+    const offset = startOfMonth.getDay() // 0=Sun
+    return Math.floor((d.getDate() - 1 + offset) / 7)
+  }
+
+  sessions.forEach(s => {
+    const d = new Date(s.created_at)
+    const idx = Math.max(0, Math.min(weeksInMonth - 1, getWeekIndexInMonth(d)))
+    buckets[idx].totalMinutes += s.duration_minutes
+    buckets[idx].effSum += s.efficiency_percentage
+    buckets[idx].count += 1
+  })
+
+  return buckets.map((b, i) => ({
+    name: `W${i + 1}`,
+    focusHours: Math.round((b.totalMinutes / 60) * 10) / 10,
+    efficiency: b.count > 0 ? Math.round(b.effSum / b.count) : 0,
+    sessions: b.count,
+  }))
+}
 
 type Session = Database['public']['Tables']['sessions']['Row']
 
@@ -204,6 +265,7 @@ export default function ProductivityDashboard() {
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [currentTask, setCurrentTask] = useState("Focus Session")
   const [isDarkMode, setIsDarkMode] = useState(false)
+  const [themeInitialized, setThemeInitialized] = useState(false)
   const [recentSessions, setRecentSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [showSessionModal, setShowSessionModal] = useState(false)
@@ -214,12 +276,96 @@ export default function ProductivityDashboard() {
   const [showDatabaseSetup, setShowDatabaseSetup] = useState(false)
   const [showEfficiencyModal, setShowEfficiencyModal] = useState(false)
   const [shouldPlaySound, setShouldPlaySound] = useState(false)
+  const [isZenMode, setIsZenMode] = useState(false)
+
+  // Persist active session across refresh
+  type ActiveSession = {
+    taskName: string
+    initialDuration: number
+    remainingSeconds: number
+    isRunning: boolean
+    startedAt: number
+    lastUpdated: number
+  }
+  const ACTIVE_SESSION_KEY = 'activeSessionV1'
+  const THEME_KEY = 'themeV1'
+
+  const loadActiveSession = (): ActiveSession | null => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = localStorage.getItem(ACTIVE_SESSION_KEY)
+      if (!raw) return null
+      return JSON.parse(raw) as ActiveSession
+    } catch {
+      return null
+    }
+  }
+
+  const saveActiveSession = (session: ActiveSession | null) => {
+    if (typeof window === 'undefined') return
+    try {
+      if (session) {
+        localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(session))
+      } else {
+        localStorage.removeItem(ACTIVE_SESSION_KEY)
+      }
+    } catch {}
+  }
+
+  // Keyboard shortcuts: Z to toggle Zen Mode, Esc to exit
+  useEffect(() => {
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'z') {
+        setIsZenMode((prev) => !prev)
+      }
+      if (e.key === 'Escape') {
+        setIsZenMode(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [])
+
+  // Initialize theme on client load (only once)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !themeInitialized) {
+      try {
+        const savedTheme = localStorage.getItem(THEME_KEY)
+        if (savedTheme === 'dark') {
+          setIsDarkMode(true)
+        } else if (savedTheme === 'light') {
+          setIsDarkMode(false)
+        } else {
+          // Check system preference
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          setIsDarkMode(prefersDark)
+        }
+      } catch {}
+      setThemeInitialized(true)
+    }
+  }, [themeInitialized])
 
   useEffect(() => {
     setIsClient(true)
     
     // Check database tables on client load
     if (isClient) {
+      // Restore active session if present
+      const restored = loadActiveSession()
+      if (restored) {
+        setCurrentTask(restored.taskName)
+        setInitialDuration(restored.initialDuration)
+        // Adjust remaining based on elapsed time if running
+        let remaining = restored.remainingSeconds
+        if (restored.isRunning) {
+          const elapsed = Math.floor((Date.now() - restored.lastUpdated) / 1000)
+          remaining = Math.max(0, remaining - elapsed)
+        }
+        setTimerMinutes(Math.floor(remaining / 60))
+        setTimerSeconds(remaining % 60)
+        setIsTimerRunning(restored.isRunning)
+      }
+
       initDatabase().then((tablesExist) => {
         setDatabaseReady(tablesExist)
         if (!tablesExist) {
@@ -232,12 +378,18 @@ export default function ProductivityDashboard() {
   }, [isClient])
 
   useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add("dark")
-    } else {
-      document.documentElement.classList.remove("dark")
+    if (themeInitialized) {
+      if (isDarkMode) {
+        document.documentElement.classList.add("dark")
+      } else {
+        document.documentElement.classList.remove("dark")
+      }
+      // Persist theme
+      try {
+        localStorage.setItem(THEME_KEY, isDarkMode ? 'dark' : 'light')
+      } catch {}
     }
-  }, [isDarkMode])
+  }, [isDarkMode, themeInitialized])
 
   // Timer countdown effect
   useEffect(() => {
@@ -262,6 +414,16 @@ export default function ProductivityDashboard() {
           }
           handleSessionComplete()
         }
+        // Persist tick
+        const remaining = (timerMinutes * 60 + timerSeconds) - 1
+        saveActiveSession({
+          taskName: currentTask,
+          initialDuration,
+          remainingSeconds: Math.max(0, remaining),
+          isRunning: true,
+          startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
+          lastUpdated: Date.now(),
+        })
       }, 1000)
     }
 
@@ -299,7 +461,19 @@ export default function ProductivityDashboard() {
   }, [])
 
   const startTimer = () => setIsTimerRunning(true)
-  const pauseTimer = () => setIsTimerRunning(false)
+  const pauseTimer = () => {
+    setIsTimerRunning(false)
+    // Save paused state
+    const remaining = timerMinutes * 60 + timerSeconds
+    saveActiveSession({
+      taskName: currentTask,
+      initialDuration,
+      remainingSeconds: remaining,
+      isRunning: false,
+      startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
+      lastUpdated: Date.now(),
+    })
+  }
   const resetTimer = () => {
     setIsTimerRunning(false)
     setTimerMinutes(50)
@@ -307,6 +481,7 @@ export default function ProductivityDashboard() {
     setInitialDuration(50)
     setCurrentTask("Focus Session")
     setSessionStartTime(null)
+    saveActiveSession(null)
   }
 
   const handleStartSession = (taskName: string, duration: number) => {
@@ -318,6 +493,16 @@ export default function ProductivityDashboard() {
     setInitialDuration(duration)
     setSessionStartTime(new Date())
     setIsTimerRunning(true)
+
+    // Persist
+    saveActiveSession({
+      taskName,
+      initialDuration: duration,
+      remainingSeconds: duration * 60,
+      isRunning: true,
+      startedAt: Date.now(),
+      lastUpdated: Date.now(),
+    })
   }
 
   const handleSessionComplete = async () => {
@@ -389,6 +574,8 @@ export default function ProductivityDashboard() {
     }
 
     resetTimer()
+    // Clear persisted active session after completion
+    saveActiveSession(null)
   }
 
   const formatTime = (minutes: number, seconds: number) => {
@@ -457,239 +644,288 @@ export default function ProductivityDashboard() {
         </div>
       </header>
 
-      <div className="flex">
-        {/* Sidebar */}
-        <aside className="w-60 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 h-[calc(100vh-4rem)] overflow-y-auto">
-          <div className="p-4">
-            <div className="relative mb-6">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search anything..."
-                className="pl-10 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-sm dark:text-white"
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute right-1 top-1/2 transform -translate-y-1/2 w-6 h-6 dark:text-gray-400"
-              >
-                <ArrowRight className="w-3 h-3" />
+      {/* Zen Mode Overlay */}
+      {isZenMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white dark:bg-black">
+          <div className="absolute top-4 right-4 flex gap-2">
+            <Button variant="outline" onClick={() => setIsZenMode(false)} className="dark:border-gray-600 dark:text-gray-300">
+              Exit Zen
+            </Button>
+          </div>
+          <div className="text-center px-6 w-full max-w-2xl">
+            <div className="text-7xl sm:text-8xl font-mono font-bold text-gray-900 dark:text-white mb-6">
+              {formatTime(timerMinutes, timerSeconds)}
+            </div>
+            <div className="text-lg text-gray-600 dark:text-gray-400 mb-6">{currentTask}</div>
+            <Progress value={((timerMinutes * 60 + timerSeconds) / (initialDuration * 60)) * 100} className="h-3 mb-8" />
+            <div className="flex gap-3 justify-center">
+              {!isTimerRunning ? (
+                <Button onClick={() => setShowSessionModal(true)} className="bg-green-600 hover:bg-green-700">
+                  <Play className="w-4 h-4 mr-2" /> Start Session
+                </Button>
+              ) : (
+                <>
+                  <Button onClick={() => setIsTimerRunning(false)} className="bg-yellow-600 hover:bg-yellow-700">
+                    <Pause className="w-4 h-4 mr-2" /> Pause
+                  </Button>
+                  <Button onClick={handleSessionComplete} className="bg-red-600 hover:bg-red-700">
+                    <CheckCircle className="w-4 h-4 mr-2" /> Complete
+                  </Button>
+                </>
+              )}
+              <Button onClick={resetTimer} variant="outline" className="dark:border-gray-600 dark:text-gray-300">
+                <RotateCcw className="w-4 h-4 mr-2" /> Reset
               </Button>
             </div>
-
-            <nav className="space-y-1">
-              <Button
-                variant="ghost"
-                className="flex items-center w-full justify-start bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                <Home className="w-4 h-4 mr-3" />
-                Overview
-              </Button>
-              <Button
-                variant="ghost"
-                className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                <Timer className="w-4 h-4 mr-3" />
-                Focus Timer
-              </Button>
-              <Button
-                variant="ghost"
-                className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                <BarChart3 className="w-4 h-4 mr-3" />
-                Analytics
-              </Button>
-              <Button
-                variant="ghost"
-                className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                <Calendar className="w-4 h-4 mr-3" />
-                Schedule
-              </Button>
-              <Button
-                variant="ghost"
-                className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                <Target className="w-4 h-4 mr-3" />
-                Goals
-              </Button>
-              <Button
-                variant="ghost"
-                className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                <Settings className="w-4 h-4 mr-3" />
-                Settings
-              </Button>
-            </nav>
           </div>
-        </aside>
+        </div>
+      )}
 
-        {/* Main Content */}
-        <main className="flex-1 p-8 bg-gray-50 dark:bg-gray-800">
-          {/* Header Section */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Productivity Dashboard</h1>
-                <p className="text-gray-600 dark:text-gray-300 mt-1">
-                  Track your focus, efficiency, and achieve your goals
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="gap-2 bg-transparent dark:border-gray-600 dark:text-gray-300">
-                      {selectedPeriod} <ChevronDown className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="dark:bg-gray-800 dark:border-gray-700">
-                    <DropdownMenuItem
-                      onClick={() => setSelectedPeriod("Today")}
-                      className="dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                      Today
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setSelectedPeriod("This Week")}
-                      className="dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                      This Week
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => setSelectedPeriod("This Month")}
-                      className="dark:text-gray-300 dark:hover:bg-gray-700"
-                    >
-                      This Month
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button className="bg-blue-600 hover:bg-blue-700">
-                  <Plus className="w-4 h-4 mr-2" />
-                  New Goal
+      {/* When not in Zen Mode, render the full dashboard */}
+      {!isZenMode && (
+        <div className="flex">
+          {/* Sidebar */}
+          <aside className="w-60 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 h-[calc(100vh-4rem)] overflow-y-auto">
+            <div className="p-4">
+              <div className="relative mb-6">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search anything..."
+                  className="pl-10 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-sm dark:text-white"
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="absolute right-1 top-1/2 transform -translate-y-1/2 w-6 h-6 dark:text-gray-400"
+                >
+                  <ArrowRight className="w-3 h-3" />
                 </Button>
               </div>
+
+              <nav className="space-y-1">
+                <Button
+                  variant="ghost"
+                  className="flex items-center w-full justify-start bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <Home className="w-4 h-4 mr-3" />
+                  Overview
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <Timer className="w-4 h-4 mr-3" />
+                  Focus Timer
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <BarChart3 className="w-4 h-4 mr-3" />
+                  Analytics
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <Calendar className="w-4 h-4 mr-3" />
+                  Schedule
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <Target className="w-4 h-4 mr-3" />
+                  Goals
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <Settings className="w-4 h-4 mr-3" />
+                  Settings
+                </Button>
+              </nav>
             </div>
-          </div>
+          </aside>
 
-          {/* Metrics Overview */}
-          <div className="grid grid-cols-4 gap-6 mb-8">
-                            {calculateMetrics(filterSessionsByPeriod(recentSessions, selectedPeriod)).map((metric, index) => (
-              <Card key={index} className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
-                      <metric.icon className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+          {/* Main Content */}
+          <main className="flex-1 p-8 bg-gray-50 dark:bg-gray-800">
+            {/* Header Section */}
+            <div className="mb-8">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">Productivity Dashboard</h1>
+                  <p className="text-gray-600 dark:text-gray-300 mt-1">
+                    Track your focus, efficiency, and achieve your goals
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="gap-2 bg-transparent dark:border-gray-600 dark:text-gray-300">
+                        {selectedPeriod} <ChevronDown className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="dark:bg-gray-800 dark:border-gray-700">
+                      <DropdownMenuItem
+                        onClick={() => setSelectedPeriod("Today")}
+                        className="dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        Today
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setSelectedPeriod("This Week")}
+                        className="dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        This Week
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setSelectedPeriod("This Month")}
+                        className="dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        This Month
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button className="bg-blue-600 hover:bg-blue-700">
+                    <Plus className="w-4 h-4 mr-2" />
+                    New Goal
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Metrics Overview */}
+            <div className="grid grid-cols-4 gap-6 mb-8">
+              {calculateMetrics(filterSessionsByPeriod(recentSessions, selectedPeriod)).map((metric, index) => (
+                <Card key={index} className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
+                  <CardContent className="p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center">
+                        <metric.icon className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                      </div>
+                      <div
+                        className={`flex items-center gap-1 text-sm ${metric.trend === "up" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+                      >
+                        {metric.trend === "up" ? (
+                          <TrendingUp className="w-3 h-3" />
+                        ) : (
+                          <TrendingDown className="w-3 h-3" />
+                        )}
+                        {metric.change}
+                      </div>
                     </div>
-                    <div
-                      className={`flex items-center gap-1 text-sm ${metric.trend === "up" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
-                    >
-                      {metric.trend === "up" ? (
-                        <TrendingUp className="w-3 h-3" />
-                      ) : (
-                        <TrendingDown className="w-3 h-3" />
-                      )}
-                      {metric.change}
+                    <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-1">{metric.value}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">{metric.label}</div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-8">
+              {/* Main Content Area */}
+              <div className="col-span-2 space-y-8">
+                {/* Charts Section */}
+                <div className="grid grid-cols-2 gap-6">
+                  <FocusHoursPie 
+                    title="Focus Hours Breakdown" 
+                    description={`How you spent your time ${selectedPeriod.toLowerCase()}`} 
+                    data={calculateFocusHoursData(filterSessionsByPeriod(recentSessions, selectedPeriod))} 
+                  />
+
+                  <EfficiencyPie 
+                    title="Focus Efficiency" 
+                    description={`Your productivity quality ${selectedPeriod.toLowerCase()}`} 
+                    data={calculateEfficiencyData(filterSessionsByPeriod(recentSessions, selectedPeriod))} 
+                  />
+                </div>
+
+                {/* Weekly Trends */}
+                <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
+                  <CardHeader className="pb-4">
+                    <CardTitle className="text-lg font-semibold dark:text-white">Weekly Productivity Trends</CardTitle>
+                    <CardDescription className="dark:text-gray-400">
+                      Your focus hours and efficiency over time
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-80">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={calculateTrendData(filterSessionsByPeriod(recentSessions, selectedPeriod), selectedPeriod)}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                          <XAxis dataKey="name" stroke="#6b7280" fontSize={12} />
+                          <YAxis stroke="#6b7280" fontSize={12} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "white",
+                              border: "1px solid #e5e7eb",
+                              borderRadius: "8px",
+                              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                            }}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="focusHours"
+                            stroke="#3b82f6"
+                            fill="#3b82f6"
+                            fillOpacity={0.1}
+                            strokeWidth={2}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="efficiency"
+                            stroke="#10b981"
+                            fill="#10b981"
+                            fillOpacity={0.1}
+                            strokeWidth={2}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
                     </div>
-                  </div>
-                  <div className="text-2xl font-semibold text-gray-900 dark:text-white mb-1">{metric.value}</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">{metric.label}</div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-3 gap-8">
-            {/* Main Content Area */}
-            <div className="col-span-2 space-y-8">
-              {/* Charts Section */}
-              <div className="grid grid-cols-2 gap-6">
-                <FocusHoursPie 
-                  title="Focus Hours Breakdown" 
-                  description={`How you spent your time ${selectedPeriod.toLowerCase()}`} 
-                  data={calculateFocusHoursData(filterSessionsByPeriod(recentSessions, selectedPeriod))} 
-                />
-
-                <EfficiencyPie 
-                  title="Focus Efficiency" 
-                  description={`Your productivity quality ${selectedPeriod.toLowerCase()}`} 
-                  data={calculateEfficiencyData(filterSessionsByPeriod(recentSessions, selectedPeriod))} 
-                />
+                  </CardContent>
+                </Card>
               </div>
 
-              {/* Weekly Trends */}
-              <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-lg font-semibold dark:text-white">Weekly Productivity Trends</CardTitle>
-                  <CardDescription className="dark:text-gray-400">
-                    Your focus hours and efficiency over time
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                        <XAxis dataKey="name" stroke="#6b7280" fontSize={12} />
-                        <YAxis stroke="#6b7280" fontSize={12} />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: "white",
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "8px",
-                            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                          }}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="focusHours"
-                          stroke="#3b82f6"
-                          fill="#3b82f6"
-                          fillOpacity={0.1}
-                          strokeWidth={2}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="efficiency"
-                          stroke="#10b981"
-                          fill="#10b981"
-                          fillOpacity={0.1}
-                          strokeWidth={2}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Right Sidebar */}
-            <div className="space-y-6">
-              {/* Pomodoro Timer */}
-              <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-lg font-semibold dark:text-white">Pomodoro Timer</CardTitle>
-                  <CardDescription className="dark:text-gray-400">
-                    Stay focused with timed work sessions
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                                                            <div className="text-center mb-6">
-                        {!isClient ? (
+              {/* Right Sidebar */}
+              <div className="space-y-6">
+                {/* Pomodoro Timer */}
+                <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
+                  <CardHeader className="pb-4 flex items-start justify-between">
+                    <div>
+                      <CardTitle className="text-lg font-semibold dark:text-white">Pomodoro Timer</CardTitle>
+                      <CardDescription className="dark:text-gray-400">
+                        Stay focused with timed work sessions
+                      </CardDescription>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 bg-transparent dark:border-gray-600 dark:text-gray-300"
+                      onClick={() => setIsZenMode(true)}
+                    >
+                      <Timer className="w-4 h-4" /> Zen
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-center mb-6">
+                      {!isClient ? (
+                        <div className="text-4xl font-mono font-bold text-gray-900 dark:text-white mb-2">
+                          Loading...
+                        </div>
+                      ) : (
+                        <>
                           <div className="text-4xl font-mono font-bold text-gray-900 dark:text-white mb-2">
-                            Loading...
+                            {formatTime(timerMinutes, timerSeconds)}
                           </div>
-                        ) : (
-                          <>
-                            <div className="text-4xl font-mono font-bold text-gray-900 dark:text-white mb-2">
-                              {formatTime(timerMinutes, timerSeconds)}
-                            </div>
-                            <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">{currentTask}</div>
-                            <Progress
-                              value={((timerMinutes * 60 + timerSeconds) / (initialDuration * 60)) * 100}
-                              className="h-2 mb-4"
-                            />
-                          </>
-                        )}
-                      </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">{currentTask}</div>
+                          <Progress
+                            value={((timerMinutes * 60 + timerSeconds) / (initialDuration * 60)) * 100}
+                            className="h-2 mb-4"
+                          />
+                        </>
+                      )}
+                    </div>
                     <div className="flex gap-2">
                       {!isTimerRunning ? (
                         <Button onClick={() => setShowSessionModal(true)} className="flex-1 bg-green-600 hover:bg-green-700">
@@ -720,82 +956,83 @@ export default function ProductivityDashboard() {
                         Reset
                       </Button>
                     </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              {/* Today's Progress */}
-              <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-lg font-semibold dark:text-white">{selectedPeriod}'s Progress</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Daily Goal</span>
-                      <span className="text-sm font-medium dark:text-white">8 hours</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Completed</span>
-                      <span className="text-sm font-medium dark:text-white">
-                        {Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) * 10) / 10} hours
-                      </span>
-                    </div>
-                    <Progress 
-                      value={Math.min(100, Math.round((filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) / 8) * 100))} 
-                      className="h-2" 
-                    />
-                    <div className="text-center">
-                      <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
-                        {filterSessionsByPeriod(recentSessions, selectedPeriod).length > 0 
-                          ? Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + session.efficiency_percentage, 0) / filterSessionsByPeriod(recentSessions, selectedPeriod).length)
-                          : 0}%
+                {/* Today's Progress */}
+                <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
+                  <CardHeader className="pb-4">
+                    <CardTitle className="text-lg font-semibold dark:text-white">{selectedPeriod}'s Progress</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Daily Goal</span>
+                        <span className="text-sm font-medium dark:text-white">8 hours</span>
                       </div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">Efficiency Score</div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600 dark:text-gray-400">Completed</span>
+                        <span className="text-sm font-medium dark:text-white">
+                          {Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) * 10) / 10} hours
+                        </span>
+                      </div>
+                      <Progress 
+                        value={Math.min(100, Math.round((filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) / 8) * 100))} 
+                        className="h-2" 
+                      />
+                      <div className="text-center">
+                        <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
+                          {filterSessionsByPeriod(recentSessions, selectedPeriod).length > 0 
+                            ? Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + session.efficiency_percentage, 0) / filterSessionsByPeriod(recentSessions, selectedPeriod).length)
+                            : 0}%
+                        </div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">Efficiency Score</div>
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              {/* Recent Sessions */}
-              <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
-                <CardHeader className="pb-4">
-                  <CardTitle className="text-lg font-semibold dark:text-white">Recent Sessions</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="space-y-0">
-                    {loading ? (
-                      <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                        Loading sessions...
-                      </div>
-                    ) : recentSessions.length === 0 ? (
-                      <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-                        No sessions yet. Start your first focus session!
-                      </div>
-                    ) : (
-                      recentSessions.slice(0, 5).map((session, index) => (
-                        <div
-                          key={session.id}
-                          className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
-                        >
-                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
-                              {session.task}
-                            </div>
-                            <div className="text-xs text-gray-600 dark:text-gray-400">
-                              {session.duration_minutes} min • {session.efficiency_percentage}% efficiency • {new Date(session.created_at).toLocaleDateString()}
+                {/* Recent Sessions */}
+                <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
+                  <CardHeader className="pb-4">
+                    <CardTitle className="text-lg font-semibold dark:text-white">Recent Sessions</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="space-y-0">
+                      {loading ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                          Loading sessions...
+                        </div>
+                      ) : recentSessions.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+                          No sessions yet. Start your first focus session!
+                        </div>
+                      ) : (
+                        recentSessions.slice(0, 5).map((session, index) => (
+                          <div
+                            key={session.id}
+                            className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                          >
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                                {session.task}
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">
+                                {session.duration_minutes} min • {session.efficiency_percentage}% efficiency • {new Date(session.created_at).toLocaleDateString()}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </div>
-        </main>
-      </div>
+          </main>
+        </div>
+      )}
       
       <SessionSetupModal
         isOpen={showSessionModal}
