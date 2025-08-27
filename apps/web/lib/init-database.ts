@@ -1,3 +1,53 @@
+import { supabase } from './supabase'
+import { runMigrations } from './migrations'
+
+export async function initDatabase() {
+  try {
+    console.log('🔄 Initializing database...')
+    
+    // Try to run migrations first
+    const migrationSuccess = await runMigrations()
+    
+    if (migrationSuccess) {
+      console.log('✅ Database initialized successfully')
+      return true
+    }
+    
+    // If migrations failed, check if tables exist anyway
+    const { data: tasks, error: tasksError } = await supabase
+      .from('tasks')
+      .select('count')
+      .limit(1)
+    
+    if (tasksError) {
+      console.error('❌ Database tables not found!')
+      console.error('Please run the SQL schema in your Supabase dashboard:')
+      console.error('1. Go to Supabase Dashboard → SQL Editor')
+      console.error('2. Copy the contents of apps/web/supabase-schema.sql')
+      console.error('3. Paste and run the SQL')
+      console.error('4. Refresh this page')
+      return false
+    }
+    
+    console.log('✅ Database tables exist')
+    return true
+    
+  } catch (error) {
+    console.error('Error checking database:', error)
+    return false
+  }
+}
+
+export function getDatabaseSetupInstructions() {
+  return `
+🚨 Database Setup Required
+
+Your Supabase database tables don't exist yet. Please follow these steps:
+
+1. Go to your Supabase Dashboard
+2. Navigate to SQL Editor (left sidebar)
+3. Copy and paste this SQL:
+
 -- Create users table
 CREATE TABLE users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -67,3 +117,10 @@ INSERT INTO sessions (user_id, task, duration_minutes, efficiency_percentage) VA
   ((SELECT id FROM users WHERE email = 'alex@example.com'), 'Design Work', 50, 95),
   ((SELECT id FROM users WHERE email = 'alex@example.com'), 'Email Processing', 25, 78),
   ((SELECT id FROM users WHERE email = 'alex@example.com'), 'Research', 50, 85);
+
+4. Click "Run" to execute the SQL
+5. Refresh this page
+
+After running the SQL, custom task saving will work automatically!
+  `
+}

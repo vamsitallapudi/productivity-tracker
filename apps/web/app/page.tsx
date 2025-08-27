@@ -1,8 +1,14 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { unstable_noStore as noStore } from 'next/cache'
+
+// Force dynamic rendering
+noStore()
+
 import { supabase } from "@/lib/supabase"
 import type { Database } from "@/lib/database.types"
+import { initDatabase, getDatabaseSetupInstructions } from "@/lib/init-database"
 import {
   Search,
   Bell,
@@ -35,7 +41,11 @@ const CartesianGrid = dynamic(() => import("recharts").then((m) => m.CartesianGr
 const Tooltip = dynamic(() => import("recharts").then((m) => m.Tooltip), { ssr: false })
 const ResponsiveContainer = dynamic(() => import("recharts").then((m) => m.ResponsiveContainer), { ssr: false })
 const Area = dynamic(() => import("recharts").then((m) => m.Area), { ssr: false })
-import { FocusHoursPie, EfficiencyPie } from "@/components/charts/PieCharts"
+import { FocusHoursPie, EfficiencyPie } from "../components/charts/PieCharts"
+import { SessionSetupModal } from "../components/session-setup-modal"
+import { DatabaseSetupModal } from "../components/database-setup-modal"
+import { EfficiencyModal } from "../components/efficiency-modal"
+import { TimerSound, playBeepSound } from "../components/timer-sound"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -50,25 +60,130 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Progress } from "@/components/ui/progress"
 
-const metricsData = [
-  { label: "Focus Hours Today", value: "6.5h", change: "+1.2h", trend: "up", icon: Clock },
-  { label: "Efficiency Rate", value: "87%", change: "+5%", trend: "up", icon: Target },
-  { label: "Sessions Completed", value: "12", change: "+3", trend: "up", icon: CheckCircle },
-  { label: "Weekly Goal", value: "92%", change: "+8%", trend: "up", icon: Zap },
-]
+// Calculate real metrics from sessions
+const calculateMetrics = (sessions: Session[]) => {
+  const totalHours = sessions.reduce((sum, session) => sum + (session.duration_minutes / 60), 0)
+  const avgEfficiency = sessions.length > 0 
+    ? Math.round(sessions.reduce((sum, session) => sum + session.efficiency_percentage, 0) / sessions.length)
+    : 0
+  const sessionsCount = sessions.length
+  
+  return [
+    { 
+      label: "Focus Hours Today", 
+      value: `${Math.round(totalHours * 10) / 10}h`, 
+      change: sessions.length > 0 ? "+" + Math.round(totalHours * 10) / 10 + "h" : "0h", 
+      trend: "up", 
+      icon: Clock 
+    },
+    { 
+      label: "Efficiency Rate", 
+      value: `${avgEfficiency}%`, 
+      change: sessions.length > 0 ? "+" + avgEfficiency + "%" : "0%", 
+      trend: avgEfficiency >= 70 ? "up" : "down", 
+      icon: Target 
+    },
+    { 
+      label: "Sessions Completed", 
+      value: sessionsCount.toString(), 
+      change: sessions.length > 0 ? "+" + sessionsCount : "0", 
+      trend: "up", 
+      icon: CheckCircle 
+    },
+    { 
+      label: "Weekly Goal", 
+      value: `${Math.round((totalHours / 40) * 100)}%`, 
+      change: "+" + Math.round((totalHours / 40) * 100) + "%", 
+      trend: "up", 
+      icon: Zap 
+    },
+  ]
+}
 
-const focusHoursData = [
-  { name: "Deep Work", value: 4.5, color: "#8b5cf6" },
-  { name: "Meetings", value: 2.0, color: "#3b82f6" },
-  { name: "Admin Tasks", value: 1.5, color: "#10b981" },
-  { name: "Breaks", value: 0.5, color: "#f59e0b" },
-]
+// Calculate real data from sessions
+const calculateFocusHoursData = (sessions: Session[]) => {
+  const taskHours: { [key: string]: number } = {}
+  
+  sessions.forEach(session => {
+    const hours = session.duration_minutes / 60
+    taskHours[session.task] = (taskHours[session.task] || 0) + hours
+  })
+  
+  // Convert to pie chart format
+  const colors = ["#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#06b6d4", "#84cc16", "#f97316"]
+  const data = Object.entries(taskHours)
+    .sort(([,a], [,b]) => b - a) // Sort by hours descending
+    .slice(0, 6) // Top 6 tasks
+    .map(([task, hours], index) => ({
+      name: task,
+      value: Math.round(hours * 10) / 10, // Round to 1 decimal
+      color: colors[index % colors.length]
+    }))
+  
+  return data.length > 0 ? data : [
+    { name: "No Data", value: 1, color: "#6b7280" }
+  ]
+}
 
-const efficiencyData = [
-  { name: "Productive", value: 87, color: "#10b981" },
-  { name: "Neutral", value: 8, color: "#f59e0b" },
-  { name: "Distracted", value: 5, color: "#ef4444" },
-]
+const calculateEfficiencyData = (sessions: Session[]) => {
+  if (sessions.length === 0) {
+    return [
+      { name: "No Data", value: 100, color: "#6b7280" }
+    ]
+  }
+  
+  const totalSessions = sessions.length
+  const productive = sessions.filter(s => s.efficiency_percentage >= 70).length
+  const neutral = sessions.filter(s => s.efficiency_percentage >= 50 && s.efficiency_percentage < 70).length
+  const distracted = sessions.filter(s => s.efficiency_percentage < 50).length
+  
+  const data = []
+  if (productive > 0) {
+    data.push({ name: "Productive", value: Math.round((productive / totalSessions) * 100), color: "#10b981" })
+  }
+  if (neutral > 0) {
+    data.push({ name: "Neutral", value: Math.round((neutral / totalSessions) * 100), color: "#f59e0b" })
+  }
+  if (distracted > 0) {
+    data.push({ name: "Distracted", value: Math.round((distracted / totalSessions) * 100), color: "#ef4444" })
+  }
+  
+  return data.length > 0 ? data : [
+    { name: "No Data", value: 100, color: "#6b7280" }
+  ]
+}
+
+// Filter sessions by selected period
+const filterSessionsByPeriod = (sessions: Session[], period: string) => {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  
+  switch (period) {
+    case "Today":
+      return sessions.filter(session => {
+        const sessionDate = new Date(session.created_at)
+        return sessionDate >= today
+      })
+    
+    case "This Week":
+      const startOfWeek = new Date(today)
+      startOfWeek.setDate(today.getDate() - today.getDay()) // Start of week (Sunday)
+      return sessions.filter(session => {
+        const sessionDate = new Date(session.created_at)
+        return sessionDate >= startOfWeek
+      })
+    
+    case "This Month":
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      return sessions.filter(session => {
+        const sessionDate = new Date(session.created_at)
+        return sessionDate >= startOfMonth
+      })
+    
+    default:
+      return sessions
+  }
+}
 
 const chartData = [
   { name: "Mon", focusHours: 7.2, efficiency: 85, sessions: 14 },
@@ -91,6 +206,30 @@ export default function ProductivityDashboard() {
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [recentSessions, setRecentSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const [showSessionModal, setShowSessionModal] = useState(false)
+  const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null)
+  const [initialDuration, setInitialDuration] = useState(50)
+  const [isClient, setIsClient] = useState(false)
+  const [databaseReady, setDatabaseReady] = useState(false)
+  const [showDatabaseSetup, setShowDatabaseSetup] = useState(false)
+  const [showEfficiencyModal, setShowEfficiencyModal] = useState(false)
+  const [shouldPlaySound, setShouldPlaySound] = useState(false)
+
+  useEffect(() => {
+    setIsClient(true)
+    
+    // Check database tables on client load
+    if (isClient) {
+      initDatabase().then((tablesExist) => {
+        setDatabaseReady(tablesExist)
+        if (!tablesExist) {
+          console.warn('Database tables may not exist. Please run the SQL schema.')
+          console.log(getDatabaseSetupInstructions())
+          setShowDatabaseSetup(true)
+        }
+      })
+    }
+  }, [isClient])
 
   useEffect(() => {
     if (isDarkMode) {
@@ -100,17 +239,55 @@ export default function ProductivityDashboard() {
     }
   }, [isDarkMode])
 
+  // Timer countdown effect
+  useEffect(() => {
+    if (!isClient) return
+
+    let interval: NodeJS.Timeout | null = null
+
+    if (isTimerRunning && (timerMinutes > 0 || timerSeconds > 0)) {
+      interval = setInterval(() => {
+        if (timerSeconds > 0) {
+          setTimerSeconds(timerSeconds - 1)
+        } else if (timerMinutes > 0) {
+          setTimerMinutes(timerMinutes - 1)
+          setTimerSeconds(59)
+        } else {
+          // Timer finished
+          setIsTimerRunning(false)
+          setShouldPlaySound(true) // Trigger sound
+          // Also play fallback beep sound
+          if (typeof window !== 'undefined') {
+            playBeepSound()
+          }
+          handleSessionComplete()
+        }
+      }, 1000)
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval)
+      }
+    }
+  }, [isTimerRunning, timerMinutes, timerSeconds, isClient])
+
   useEffect(() => {
     async function fetchRecentSessions() {
       try {
-        const { data, error } = await supabase
+        // Fetch all sessions for charts and metrics
+        const { data: allSessions, error: allError } = await supabase
           .from('sessions')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(5)
         
-        if (error) throw error
-        setRecentSessions(data || [])
+        if (allError) throw allError
+        
+        // Get recent 5 sessions for the recent sessions list
+        const recent5 = allSessions?.slice(0, 5) || []
+        
+        setRecentSessions(allSessions || [])
+        console.log('Fetched all sessions:', allSessions?.length || 0)
       } catch (error) {
         console.error('Error fetching sessions:', error)
       } finally {
@@ -127,6 +304,91 @@ export default function ProductivityDashboard() {
     setIsTimerRunning(false)
     setTimerMinutes(50)
     setTimerSeconds(0)
+    setInitialDuration(50)
+    setCurrentTask("Focus Session")
+    setSessionStartTime(null)
+  }
+
+  const handleStartSession = (taskName: string, duration: number) => {
+    if (!isClient) return
+    
+    setCurrentTask(taskName)
+    setTimerMinutes(duration)
+    setTimerSeconds(0)
+    setInitialDuration(duration)
+    setSessionStartTime(new Date())
+    setIsTimerRunning(true)
+  }
+
+  const handleSessionComplete = async () => {
+    if (!isClient) return
+    
+    // Show efficiency modal instead of auto-calculating
+    setShowEfficiencyModal(true)
+  }
+
+  const handleSaveSession = async (efficiency: number) => {
+    try {
+      // Calculate duration based on initial duration minus remaining time
+      const remainingTime = timerMinutes * 60 + timerSeconds
+      const actualDuration = Math.max(1, initialDuration - Math.floor(remainingTime / 60)) // At least 1 minute
+
+      console.log('Completing session:', {
+        task: currentTask,
+        actualDuration,
+        efficiency,
+        remainingTime,
+        initialDuration
+      })
+
+      // First, get the user ID from the database
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', 'alex@example.com')
+        .single()
+
+      if (userError) {
+        console.error('Error fetching user:', userError)
+        throw userError
+      }
+
+      console.log('User found:', userData)
+
+      // Insert the session with the correct user ID
+      const { error } = await supabase
+        .from('sessions')
+        .insert({
+          user_id: (userData as any).id,
+          task: currentTask,
+          duration_minutes: actualDuration,
+          efficiency_percentage: efficiency
+        } as any)
+
+      if (error) {
+        console.error('Supabase error:', error)
+        throw error
+      }
+
+      console.log('Session saved successfully')
+
+      // Refresh all sessions
+      const { data: allSessions, error: fetchError } = await supabase
+        .from('sessions')
+        .select('*')
+        .order('created_at', { ascending: false })
+      
+      if (!fetchError && allSessions) {
+        setRecentSessions(allSessions)
+        console.log('All sessions updated:', allSessions.length)
+      } else if (fetchError) {
+        console.error('Error fetching sessions:', fetchError)
+      }
+    } catch (error) {
+      console.error('Error saving session:', error)
+    }
+
+    resetTimer()
   }
 
   const formatTime = (minutes: number, seconds: number) => {
@@ -310,7 +572,7 @@ export default function ProductivityDashboard() {
 
           {/* Metrics Overview */}
           <div className="grid grid-cols-4 gap-6 mb-8">
-            {metricsData.map((metric, index) => (
+                            {calculateMetrics(filterSessionsByPeriod(recentSessions, selectedPeriod)).map((metric, index) => (
               <Card key={index} className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between mb-4">
@@ -340,9 +602,17 @@ export default function ProductivityDashboard() {
             <div className="col-span-2 space-y-8">
               {/* Charts Section */}
               <div className="grid grid-cols-2 gap-6">
-                <FocusHoursPie title="Focus Hours Breakdown" description="How you spent your time today" data={focusHoursData} />
+                <FocusHoursPie 
+                  title="Focus Hours Breakdown" 
+                  description={`How you spent your time ${selectedPeriod.toLowerCase()}`} 
+                  data={calculateFocusHoursData(filterSessionsByPeriod(recentSessions, selectedPeriod))} 
+                />
 
-                <EfficiencyPie title="Focus Efficiency" description="Your productivity quality today" data={efficiencyData} />
+                <EfficiencyPie 
+                  title="Focus Efficiency" 
+                  description={`Your productivity quality ${selectedPeriod.toLowerCase()}`} 
+                  data={calculateEfficiencyData(filterSessionsByPeriod(recentSessions, selectedPeriod))} 
+                />
               </div>
 
               {/* Weekly Trends */}
@@ -402,44 +672,61 @@ export default function ProductivityDashboard() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-center mb-6">
-                    <div className="text-4xl font-mono font-bold text-gray-900 dark:text-white mb-2">
-                      {formatTime(timerMinutes, timerSeconds)}
+                                                            <div className="text-center mb-6">
+                        {!isClient ? (
+                          <div className="text-4xl font-mono font-bold text-gray-900 dark:text-white mb-2">
+                            Loading...
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-4xl font-mono font-bold text-gray-900 dark:text-white mb-2">
+                              {formatTime(timerMinutes, timerSeconds)}
+                            </div>
+                            <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">{currentTask}</div>
+                            <Progress
+                              value={((timerMinutes * 60 + timerSeconds) / (initialDuration * 60)) * 100}
+                              className="h-2 mb-4"
+                            />
+                          </>
+                        )}
+                      </div>
+                    <div className="flex gap-2">
+                      {!isTimerRunning ? (
+                        <Button onClick={() => setShowSessionModal(true)} className="flex-1 bg-green-600 hover:bg-green-700">
+                          <Play className="w-4 h-4 mr-2" />
+                          Start Session
+                        </Button>
+                      ) : (
+                        <>
+                          <Button onClick={pauseTimer} className="flex-1 bg-yellow-600 hover:bg-yellow-700">
+                            <Pause className="w-4 h-4 mr-2" />
+                            Pause
+                          </Button>
+                          <Button
+                            onClick={handleSessionComplete}
+                            className="flex-1 bg-red-600 hover:bg-red-700"
+                          >
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Complete
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        onClick={resetTimer}
+                        variant="outline"
+                        className="flex-1 bg-transparent dark:border-gray-600 dark:text-gray-300"
+                      >
+                        <RotateCcw className="w-4 h-4 mr-2" />
+                        Reset
+                      </Button>
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400 mb-4">{currentTask}</div>
-                    <Progress
-                      value={((50 * 60 - (timerMinutes * 60 + timerSeconds)) / (50 * 60)) * 100}
-                      className="h-2 mb-4"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    {!isTimerRunning ? (
-                      <Button onClick={startTimer} className="flex-1 bg-green-600 hover:bg-green-700">
-                        <Play className="w-4 h-4 mr-2" />
-                        Start
-                      </Button>
-                    ) : (
-                      <Button onClick={pauseTimer} className="flex-1 bg-yellow-600 hover:bg-yellow-700">
-                        <Pause className="w-4 h-4 mr-2" />
-                        Pause
-                      </Button>
-                    )}
-                    <Button
-                      onClick={resetTimer}
-                      variant="outline"
-                      className="flex-1 bg-transparent dark:border-gray-600 dark:text-gray-300"
-                    >
-                      <RotateCcw className="w-4 h-4 mr-2" />
-                      Reset
-                    </Button>
-                  </div>
                 </CardContent>
               </Card>
 
               {/* Today's Progress */}
               <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
                 <CardHeader className="pb-4">
-                  <CardTitle className="text-lg font-semibold dark:text-white">Today's Progress</CardTitle>
+                  <CardTitle className="text-lg font-semibold dark:text-white">{selectedPeriod}'s Progress</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
@@ -449,11 +736,20 @@ export default function ProductivityDashboard() {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600 dark:text-gray-400">Completed</span>
-                      <span className="text-sm font-medium dark:text-white">6.5 hours</span>
+                      <span className="text-sm font-medium dark:text-white">
+                        {Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) * 10) / 10} hours
+                      </span>
                     </div>
-                    <Progress value={81} className="h-2" />
+                    <Progress 
+                      value={Math.min(100, Math.round((filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) / 8) * 100))} 
+                      className="h-2" 
+                    />
                     <div className="text-center">
-                      <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">87%</div>
+                      <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
+                        {filterSessionsByPeriod(recentSessions, selectedPeriod).length > 0 
+                          ? Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + session.efficiency_percentage, 0) / filterSessionsByPeriod(recentSessions, selectedPeriod).length)
+                          : 0}%
+                      </div>
                       <div className="text-sm text-gray-600 dark:text-gray-400">Efficiency Score</div>
                     </div>
                   </div>
@@ -476,7 +772,7 @@ export default function ProductivityDashboard() {
                         No sessions yet. Start your first focus session!
                       </div>
                     ) : (
-                      recentSessions.map((session, index) => (
+                      recentSessions.slice(0, 5).map((session, index) => (
                         <div
                           key={session.id}
                           className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-b-0"
@@ -500,6 +796,29 @@ export default function ProductivityDashboard() {
           </div>
         </main>
       </div>
+      
+      <SessionSetupModal
+        isOpen={showSessionModal}
+        onClose={() => setShowSessionModal(false)}
+        onStartSession={handleStartSession}
+      />
+      
+      {showDatabaseSetup && (
+        <DatabaseSetupModal />
+      )}
+
+      <EfficiencyModal
+        isOpen={showEfficiencyModal}
+        onClose={() => setShowEfficiencyModal(false)}
+        onSave={handleSaveSession}
+        taskName={currentTask}
+        duration={initialDuration}
+      />
+
+      <TimerSound
+        shouldPlay={shouldPlaySound}
+        onPlayed={() => setShouldPlaySound(false)}
+      />
     </div>
   )
 }

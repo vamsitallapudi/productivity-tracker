@@ -1,6 +1,26 @@
 export interface Database {
   public: {
     Tables: {
+      tasks: {
+        Row: {
+          id: string
+          name: string
+          category: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          category: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          category?: string
+          created_at?: string
+        }
+      }
       sessions: {
         Row: {
           id: string
