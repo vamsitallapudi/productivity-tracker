@@ -1,27 +1,47 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Dependencies
+node_modules/
+**/node_modules/
 
-# dependencies
-/node_modules
+# Next.js
+.next/
+out/
+.next/cache/
 
-# next.js
-/.next/
-/out/
+# Build artifacts
+dist/
+build/
 
-# production
-/build
+# Turborepo / Turbopack
+.turbo/
+.turbopack/
 
-# debug
+# Vercel
+.vercel/
+
+# Logs
+logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# env files
-.env*
+# Testing
+coverage/
 
-# vercel
-.vercel
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+
+# Supabase local artifacts
+supabase/.branches/
+supabase/.temp/
+
+
