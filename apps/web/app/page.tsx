@@ -355,15 +355,37 @@ export default function ProductivityDashboard() {
       if (restored) {
         setCurrentTask(restored.taskName)
         setInitialDuration(restored.initialDuration)
+        // Restore the original session start time
+        setSessionStartTime(new Date(restored.startedAt))
+        
         // Adjust remaining based on elapsed time if running
         let remaining = restored.remainingSeconds
         if (restored.isRunning) {
           const elapsed = Math.floor((Date.now() - restored.lastUpdated) / 1000)
           remaining = Math.max(0, remaining - elapsed)
         }
-        setTimerMinutes(Math.floor(remaining / 60))
-        setTimerSeconds(remaining % 60)
-        setIsTimerRunning(restored.isRunning)
+        
+        // Check if timer has completed during restoration
+        if (remaining <= 0 && restored.isRunning) {
+          // Timer completed while away - trigger completion flow
+          setTimerMinutes(0)
+          setTimerSeconds(0)
+          setIsTimerRunning(false)
+          setShouldPlaySound(true)
+          if (typeof window !== 'undefined') {
+            playBeepSound()
+          }
+          // DON'T clear the active session yet - we need the start time for saving
+          // It will be cleared after the efficiency modal is submitted
+          // Trigger efficiency modal after a short delay to ensure UI is ready
+          setTimeout(() => {
+            handleSessionComplete()
+          }, 100)
+        } else {
+          setTimerMinutes(Math.floor(remaining / 60))
+          setTimerSeconds(remaining % 60)
+          setIsTimerRunning(restored.isRunning && remaining > 0)
+        }
       }
 
       initDatabase().then((tablesExist) => {
@@ -540,14 +562,18 @@ export default function ProductivityDashboard() {
 
       console.log('User found:', userData)
 
-      // Insert the session with the correct user ID
+      // Use the original session start time if available, otherwise use current time
+      const sessionStartTimeToUse = sessionStartTime || new Date()
+      
+      // Insert the session with the correct user ID and start time
       const { error } = await supabase
         .from('sessions')
         .insert({
           user_id: (userData as any).id,
           task: currentTask,
           duration_minutes: actualDuration,
-          efficiency_percentage: efficiency
+          efficiency_percentage: efficiency,
+          created_at: sessionStartTimeToUse.toISOString()
         } as any)
 
       if (error) {
