@@ -132,25 +132,50 @@ const calculateEfficiencyData = (sessions: Session[]) => {
     ]
   }
   
-  const totalSessions = sessions.length
-  const productive = sessions.filter(s => s.efficiency_percentage >= 70).length
-  const neutral = sessions.filter(s => s.efficiency_percentage >= 50 && s.efficiency_percentage < 70).length
-  const distracted = sessions.filter(s => s.efficiency_percentage < 50).length
+  // Calculate weighted efficiency breakdown
+  const totalEfficiency = sessions.reduce((sum, session) => sum + session.efficiency_percentage, 0)
+  const avgEfficiency = totalEfficiency / sessions.length
+  
+  // Show efficiency as actual percentage vs remaining
+  const efficient = Math.round(avgEfficiency)
+  const inefficient = 100 - efficient
   
   const data = []
-  if (productive > 0) {
-    data.push({ name: "Productive", value: Math.round((productive / totalSessions) * 100), color: "#10b981" })
+  if (efficient > 0) {
+    data.push({ 
+      name: `Efficient (${efficient}%)`, 
+      value: efficient, 
+      color: efficient >= 80 ? "#10b981" : efficient >= 60 ? "#f59e0b" : "#ef4444" 
+    })
   }
-  if (neutral > 0) {
-    data.push({ name: "Neutral", value: Math.round((neutral / totalSessions) * 100), color: "#f59e0b" })
-  }
-  if (distracted > 0) {
-    data.push({ name: "Distracted", value: Math.round((distracted / totalSessions) * 100), color: "#ef4444" })
+  if (inefficient > 0) {
+    data.push({ 
+      name: `Room for Improvement`, 
+      value: inefficient, 
+      color: "#fb923c" 
+    })
   }
   
   return data.length > 0 ? data : [
     { name: "No Data", value: 100, color: "#6b7280" }
   ]
+}
+
+// Determine the best default period based on data availability
+const getBestDefaultPeriod = (sessions: Session[]) => {
+  if (sessions.length === 0) return "Today"
+  
+  const todaySessions = filterSessionsByPeriod(sessions, "Today")
+  if (todaySessions.length > 0) return "Today"
+  
+  const thisWeekSessions = filterSessionsByPeriod(sessions, "This Week")
+  if (thisWeekSessions.length > 0) return "This Week"
+  
+  const thisMonthSessions = filterSessionsByPeriod(sessions, "This Month")
+  if (thisMonthSessions.length > 0) return "This Month"
+  
+  // Fallback to Today if no data exists
+  return "Today"
 }
 
 // Filter sessions by selected period
@@ -260,10 +285,11 @@ type Session = Database['public']['Tables']['sessions']['Row']
 
 export default function ProductivityDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState("This Week")
+  const [defaultPeriodSet, setDefaultPeriodSet] = useState(false)
   const [timerMinutes, setTimerMinutes] = useState(50)
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
-  const [currentTask, setCurrentTask] = useState("Focus Session")
+  const [currentTask, setCurrentTask] = useState("DSA")
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [themeInitialized, setThemeInitialized] = useState(false)
   const [recentSessions, setRecentSessions] = useState<Session[]>([])
@@ -413,6 +439,19 @@ export default function ProductivityDashboard() {
     }
   }, [isDarkMode, themeInitialized])
 
+  // Watch for timer completion (00:00 while running)
+  useEffect(() => {
+    if (isClient && isTimerRunning && timerMinutes === 0 && timerSeconds === 0) {
+      // Timer just hit 00:00 while running - trigger completion
+      setIsTimerRunning(false)
+      setShouldPlaySound(true)
+      if (typeof window !== 'undefined') {
+        playBeepSound()
+      }
+      handleSessionComplete()
+    }
+  }, [isClient, isTimerRunning, timerMinutes, timerSeconds])
+
   // Timer countdown effect
   useEffect(() => {
     if (!isClient) return
@@ -472,6 +511,14 @@ export default function ProductivityDashboard() {
         
         setRecentSessions(allSessions || [])
         console.log('Fetched all sessions:', allSessions?.length || 0)
+        
+        // Set default period based on data availability (only on first load)
+        if (!defaultPeriodSet && allSessions && allSessions.length > 0) {
+          const bestPeriod = getBestDefaultPeriod(allSessions)
+          setSelectedPeriod(bestPeriod)
+          setDefaultPeriodSet(true)
+          console.log('Set default period to:', bestPeriod)
+        }
       } catch (error) {
         console.error('Error fetching sessions:', error)
       } finally {
@@ -492,6 +539,20 @@ export default function ProductivityDashboard() {
       initialDuration,
       remainingSeconds: remaining,
       isRunning: false,
+      startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
+      lastUpdated: Date.now(),
+    })
+  }
+
+  const resumeTimer = () => {
+    setIsTimerRunning(true)
+    // Save running state
+    const remaining = timerMinutes * 60 + timerSeconds
+    saveActiveSession({
+      taskName: currentTask,
+      initialDuration,
+      remainingSeconds: remaining,
+      isRunning: true,
       startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
       lastUpdated: Date.now(),
     })
@@ -528,8 +589,6 @@ export default function ProductivityDashboard() {
   }
 
   const handleSessionComplete = async () => {
-    if (!isClient) return
-    
     // Show efficiency modal instead of auto-calculating
     setShowEfficiencyModal(true)
   }
@@ -592,6 +651,14 @@ export default function ProductivityDashboard() {
       if (!fetchError && allSessions) {
         setRecentSessions(allSessions)
         console.log('All sessions updated:', allSessions.length)
+        
+        // If this is the first session, update default period
+        if (!defaultPeriodSet) {
+          const bestPeriod = getBestDefaultPeriod(allSessions)
+          setSelectedPeriod(bestPeriod)
+          setDefaultPeriodSet(true)
+          console.log('Set default period to:', bestPeriod, 'after first session')
+        }
       } else if (fetchError) {
         console.error('Error fetching sessions:', fetchError)
       }
@@ -686,9 +753,16 @@ export default function ProductivityDashboard() {
             <Progress value={((timerMinutes * 60 + timerSeconds) / (initialDuration * 60)) * 100} className="h-3 mb-8" />
             <div className="flex gap-3 justify-center">
               {!isTimerRunning ? (
-                <Button onClick={() => setShowSessionModal(true)} className="bg-green-600 hover:bg-green-700">
-                  <Play className="w-4 h-4 mr-2" /> Start Session
-                </Button>
+                // Show Resume if timer has time remaining (paused), Start Session if fresh
+                (timerMinutes > 0 || timerSeconds > 0) ? (
+                  <Button onClick={resumeTimer} className="bg-green-600 hover:bg-green-700">
+                    <Play className="w-4 h-4 mr-2" /> Resume
+                  </Button>
+                ) : (
+                  <Button onClick={() => setShowSessionModal(true)} className="bg-green-600 hover:bg-green-700">
+                    <Play className="w-4 h-4 mr-2" /> Start Session
+                  </Button>
+                )
               ) : (
                 <>
                   <Button onClick={() => setIsTimerRunning(false)} className="bg-yellow-600 hover:bg-yellow-700">
@@ -954,10 +1028,18 @@ export default function ProductivityDashboard() {
                     </div>
                     <div className="flex gap-2">
                       {!isTimerRunning ? (
-                        <Button onClick={() => setShowSessionModal(true)} className="flex-1 bg-green-600 hover:bg-green-700">
-                          <Play className="w-4 h-4 mr-2" />
-                          Start Session
-                        </Button>
+                        // Show Resume if timer has time remaining (paused), Start Session if fresh
+                        (timerMinutes > 0 || timerSeconds > 0) ? (
+                          <Button onClick={resumeTimer} className="flex-1 bg-green-600 hover:bg-green-700">
+                            <Play className="w-4 h-4 mr-2" />
+                            Resume
+                          </Button>
+                        ) : (
+                          <Button onClick={() => setShowSessionModal(true)} className="flex-1 bg-green-600 hover:bg-green-700">
+                            <Play className="w-4 h-4 mr-2" />
+                            Start Session
+                          </Button>
+                        )
                       ) : (
                         <>
                           <Button onClick={pauseTimer} className="flex-1 bg-yellow-600 hover:bg-yellow-700">
