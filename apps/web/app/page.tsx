@@ -225,7 +225,7 @@ const calculateTrendData = (sessions: Session[], period: string) => {
       buckets[h].count += 1
     })
     return buckets.map((b, h) => ({
-      name: String(h),
+      name: h === 0 ? '12AM' : h < 12 ? `${h}AM` : h === 12 ? '12PM' : `${h-12}PM`,
       focusHours: Math.round((b.totalMinutes / 60) * 10) / 10,
       efficiency: b.count > 0 ? Math.round(b.effSum / b.count) : 0,
       sessions: b.count,
@@ -290,6 +290,7 @@ export default function ProductivityDashboard() {
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
   const [currentTask, setCurrentTask] = useState("DSA")
+  const [lastUsedTask, setLastUsedTask] = useState<string | null>(null)
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [themeInitialized, setThemeInitialized] = useState(false)
   const [recentSessions, setRecentSessions] = useState<Session[]>([])
@@ -301,6 +302,8 @@ export default function ProductivityDashboard() {
   const [databaseReady, setDatabaseReady] = useState(false)
   const [showDatabaseSetup, setShowDatabaseSetup] = useState(false)
   const [showEfficiencyModal, setShowEfficiencyModal] = useState(false)
+  const [completedSessionRemainingTime, setCompletedSessionRemainingTime] = useState(0)
+  const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [shouldPlaySound, setShouldPlaySound] = useState(false)
   const [isZenMode, setIsZenMode] = useState(false)
 
@@ -315,6 +318,7 @@ export default function ProductivityDashboard() {
   }
   const ACTIVE_SESSION_KEY = 'activeSessionV1'
   const THEME_KEY = 'themeV1'
+  const LAST_TASK_KEY = 'lastUsedTaskV1'
 
   const loadActiveSession = (): ActiveSession | null => {
     if (typeof window === 'undefined') return null
@@ -338,7 +342,60 @@ export default function ProductivityDashboard() {
     } catch {}
   }
 
-  // Keyboard shortcuts: Z to toggle Zen Mode, Esc to exit
+  const loadLastUsedTask = (): string => {
+    if (typeof window === 'undefined') return 'DSA'
+    try {
+      const saved = localStorage.getItem(LAST_TASK_KEY)
+      return saved || 'DSA'
+    } catch {
+      return 'DSA'
+    }
+  }
+
+  const saveLastUsedTask = (task: string) => {
+    if (typeof window === 'undefined') return
+    try {
+      localStorage.setItem(LAST_TASK_KEY, task)
+    } catch {}
+  }
+
+  const clearAllPersistentData = () => {
+    if (typeof window === 'undefined') return
+    try {
+      console.log('Current localStorage contents:')
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key) {
+          console.log(`${key}: ${localStorage.getItem(key)}`)
+        }
+      }
+      
+      localStorage.removeItem(ACTIVE_SESSION_KEY)
+      localStorage.removeItem(LAST_TASK_KEY)
+      localStorage.removeItem(THEME_KEY)
+      
+      console.log('Cleared keys:', ACTIVE_SESSION_KEY, LAST_TASK_KEY, THEME_KEY)
+      console.log('Cleared all persistent data')
+    } catch {}
+  }
+
+  // Make function available globally for console debugging
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).clearAllData = clearAllPersistentData;
+      (window as any).showLocalStorage = () => {
+        console.log('=== All localStorage keys ===')
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key) {
+            console.log(`${key}: ${localStorage.getItem(key)}`)
+          }
+        }
+      };
+    }
+  }, [])
+
+  // Keyboard shortcuts: Z to toggle Zen Mode, Esc to exit, Ctrl+Shift+R to reset all data
   useEffect(() => {
     const handleKeydown = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 'z') {
@@ -346,6 +403,20 @@ export default function ProductivityDashboard() {
       }
       if (e.key === 'Escape') {
         setIsZenMode(false)
+      }
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'r') {
+        // Ctrl+Shift+R to clear all persistent data and reset
+        clearAllPersistentData()
+        // Reset all timer state
+        setIsTimerRunning(false)
+        setTimerMinutes(0)
+        setTimerSeconds(0)
+        setInitialDuration(50)
+        setCurrentTask('DSA')
+        setSessionStartTime(null)
+        setCompletedSessionRemainingTime(0)
+        setIsSessionPaused(false) // Clear paused state
+        console.log('🔄 FORCE RESET: Timer set to 00:00, should show Start Session')
       }
     }
     window.addEventListener('keydown', handleKeydown)
@@ -373,6 +444,13 @@ export default function ProductivityDashboard() {
 
   useEffect(() => {
     setIsClient(true)
+    
+    // Load last used task on client startup
+    if (typeof window !== 'undefined') {
+      const lastTask = loadLastUsedTask()
+      setCurrentTask(lastTask)
+      setLastUsedTask(lastTask)
+    }
     
     // Check database tables on client load
     if (isClient) {
@@ -411,6 +489,8 @@ export default function ProductivityDashboard() {
           setTimerMinutes(Math.floor(remaining / 60))
           setTimerSeconds(remaining % 60)
           setIsTimerRunning(restored.isRunning && remaining > 0)
+          // Set paused state if session exists but not running
+          setIsSessionPaused(!restored.isRunning && remaining > 0)
         }
       }
 
@@ -448,7 +528,16 @@ export default function ProductivityDashboard() {
       if (typeof window !== 'undefined') {
         playBeepSound()
       }
-      handleSessionComplete()
+      
+      // For natural completion, remaining time is 0
+      setCompletedSessionRemainingTime(0)
+      setIsSessionPaused(false) // Clear paused state
+      
+      // Clear the persisted active session immediately
+      saveActiveSession(null)
+      
+      // Show efficiency modal
+      setShowEfficiencyModal(true)
     }
   }, [isClient, isTimerRunning, timerMinutes, timerSeconds])
 
@@ -532,6 +621,7 @@ export default function ProductivityDashboard() {
   const startTimer = () => setIsTimerRunning(true)
   const pauseTimer = () => {
     setIsTimerRunning(false)
+    setIsSessionPaused(true) // Mark as paused
     // Save paused state
     const remaining = timerMinutes * 60 + timerSeconds
     saveActiveSession({
@@ -546,6 +636,7 @@ export default function ProductivityDashboard() {
 
   const resumeTimer = () => {
     setIsTimerRunning(true)
+    setIsSessionPaused(false) // No longer paused
     // Save running state
     const remaining = timerMinutes * 60 + timerSeconds
     saveActiveSession({
@@ -562,8 +653,9 @@ export default function ProductivityDashboard() {
     setTimerMinutes(50)
     setTimerSeconds(0)
     setInitialDuration(50)
-    setCurrentTask("Focus Session")
+    setCurrentTask(lastUsedTask || "DSA")
     setSessionStartTime(null)
+    setIsSessionPaused(false) // Reset paused state
     saveActiveSession(null)
   }
 
@@ -576,6 +668,11 @@ export default function ProductivityDashboard() {
     setInitialDuration(duration)
     setSessionStartTime(new Date())
     setIsTimerRunning(true)
+    setIsSessionPaused(false) // Starting fresh session, not paused
+
+    // Save as last used task
+    saveLastUsedTask(taskName)
+    setLastUsedTask(taskName)
 
     // Persist
     saveActiveSession({
@@ -589,14 +686,27 @@ export default function ProductivityDashboard() {
   }
 
   const handleSessionComplete = async () => {
-    // Show efficiency modal instead of auto-calculating
+    // Capture remaining time before resetting
+    const remainingTime = timerMinutes * 60 + timerSeconds
+    setCompletedSessionRemainingTime(remainingTime)
+    
+    // Immediately stop and reset timer to 00:00 when completing
+    setIsTimerRunning(false)
+    setTimerMinutes(0)
+    setTimerSeconds(0)
+    setIsSessionPaused(false) // Clear paused state
+    
+    // Clear the persisted active session immediately
+    saveActiveSession(null)
+    
+    // Show efficiency modal
     setShowEfficiencyModal(true)
   }
 
   const handleSaveSession = async (efficiency: number) => {
     try {
       // Calculate duration based on initial duration minus remaining time
-      const remainingTime = timerMinutes * 60 + timerSeconds
+      const remainingTime = completedSessionRemainingTime
       const actualDuration = Math.max(1, initialDuration - Math.floor(remainingTime / 60)) // At least 1 minute
 
       console.log('Completing session:', {
@@ -666,9 +776,14 @@ export default function ProductivityDashboard() {
       console.error('Error saving session:', error)
     }
 
+    // Close efficiency modal first
+    setShowEfficiencyModal(false)
+    
+    // Reset timer state immediately
     resetTimer()
-    // Clear persisted active session after completion
-    saveActiveSession(null)
+    
+    // Clear the captured remaining time
+    setCompletedSessionRemainingTime(0)
   }
 
   const formatTime = (minutes: number, seconds: number) => {
@@ -753,8 +868,17 @@ export default function ProductivityDashboard() {
             <Progress value={((timerMinutes * 60 + timerSeconds) / (initialDuration * 60)) * 100} className="h-3 mb-8" />
             <div className="flex gap-3 justify-center">
               {!isTimerRunning ? (
-                // Show Resume if timer has time remaining (paused), Start Session if fresh
-                (timerMinutes > 0 || timerSeconds > 0) ? (
+                // Show Resume only if session is paused, otherwise Start Session
+                (() => {
+                  console.log('🔍 Button Debug:', { 
+                    timerMinutes, 
+                    timerSeconds, 
+                    isSessionPaused,
+                    hasSessionStartTime: !!sessionStartTime,
+                    buttonWillShow: isSessionPaused ? 'Resume' : 'Start Session'
+                  });
+                  return isSessionPaused;
+                })() ? (
                   <Button onClick={resumeTimer} className="bg-green-600 hover:bg-green-700">
                     <Play className="w-4 h-4 mr-2" /> Resume
                   </Button>
@@ -765,7 +889,7 @@ export default function ProductivityDashboard() {
                 )
               ) : (
                 <>
-                  <Button onClick={() => setIsTimerRunning(false)} className="bg-yellow-600 hover:bg-yellow-700">
+                  <Button onClick={pauseTimer} className="bg-yellow-600 hover:bg-yellow-700">
                     <Pause className="w-4 h-4 mr-2" /> Pause
                   </Button>
                   <Button onClick={handleSessionComplete} className="bg-red-600 hover:bg-red-700">
@@ -944,7 +1068,9 @@ export default function ProductivityDashboard() {
                 {/* Weekly Trends */}
                 <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
                   <CardHeader className="pb-4">
-                    <CardTitle className="text-lg font-semibold dark:text-white">Weekly Productivity Trends</CardTitle>
+                    <CardTitle className="text-lg font-semibold dark:text-white">
+                      {selectedPeriod === "Today" ? "Daily" : selectedPeriod === "This Week" ? "Weekly" : "Monthly"} Productivity Trends
+                    </CardTitle>
                     <CardDescription className="dark:text-gray-400">
                       Your focus hours and efficiency over time
                     </CardDescription>
@@ -1028,8 +1154,8 @@ export default function ProductivityDashboard() {
                     </div>
                     <div className="flex gap-2">
                       {!isTimerRunning ? (
-                        // Show Resume if timer has time remaining (paused), Start Session if fresh
-                        (timerMinutes > 0 || timerSeconds > 0) ? (
+                        // Show Resume only if session is paused, otherwise Start Session
+                        isSessionPaused ? (
                           <Button onClick={resumeTimer} className="flex-1 bg-green-600 hover:bg-green-700">
                             <Play className="w-4 h-4 mr-2" />
                             Resume
@@ -1076,7 +1202,7 @@ export default function ProductivityDashboard() {
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-600 dark:text-gray-400">Daily Goal</span>
-                        <span className="text-sm font-medium dark:text-white">8 hours</span>
+                        <span className="text-sm font-medium dark:text-white">6 hours</span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-600 dark:text-gray-400">Completed</span>
@@ -1085,7 +1211,7 @@ export default function ProductivityDashboard() {
                         </span>
                       </div>
                       <Progress 
-                        value={Math.min(100, Math.round((filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) / 8) * 100))} 
+                        value={Math.min(100, Math.round((filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) / 6) * 100))} 
                         className="h-2" 
                       />
                       <div className="text-center">
@@ -1146,6 +1272,7 @@ export default function ProductivityDashboard() {
         isOpen={showSessionModal}
         onClose={() => setShowSessionModal(false)}
         onStartSession={handleStartSession}
+        defaultTask={currentTask}
       />
       
       {showDatabaseSetup && (

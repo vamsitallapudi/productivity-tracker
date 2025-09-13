@@ -21,6 +21,7 @@ interface SessionSetupModalProps {
   isOpen: boolean
   onClose: () => void
   onStartSession: (taskName: string, duration: number) => void
+  defaultTask?: string
 }
 
 const durationOptions = [
@@ -29,7 +30,7 @@ const durationOptions = [
   { value: 90, label: "90 min (Extended)" },
 ]
 
-export function SessionSetupModal({ isOpen, onClose, onStartSession }: SessionSetupModalProps) {
+export function SessionSetupModal({ isOpen, onClose, onStartSession, defaultTask }: SessionSetupModalProps) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedTask, setSelectedTask] = useState("")
   const [customTask, setCustomTask] = useState("")
@@ -39,8 +40,12 @@ export function SessionSetupModal({ isOpen, onClose, onStartSession }: SessionSe
   useEffect(() => {
     if (isOpen) {
       fetchTasks()
+      // Set default task if provided
+      if (defaultTask) {
+        setSelectedTask(defaultTask)
+      }
     }
-  }, [isOpen])
+  }, [isOpen, defaultTask])
 
   async function fetchTasks() {
     try {
