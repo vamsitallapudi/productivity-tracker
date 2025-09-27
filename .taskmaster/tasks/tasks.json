@@ -1,0 +1,22 @@
+{
+  "development": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Add user profile management feature with name and email preferences",
+        "description": "Implement user profile management functionality allowing users to view and update their display name and email notification preferences within the FocusFlow application.",
+        "details": "Create a comprehensive user profile management system that includes: 1) Database schema updates to add user profile fields (display_name, email_preferences) to the existing users table, 2) Backend API endpoints for fetching and updating user profile data, 3) Frontend profile page component with form validation using React Hook Form and Zod, 4) Integration with existing authentication system to ensure users can only modify their own profiles, 5) Email preference settings for notifications (session reminders, weekly summaries, achievement notifications), 6) Profile avatar upload capability with image optimization and storage, 7) Form state management with optimistic updates and error handling, 8) Responsive design consistent with existing FocusFlow UI patterns using Tailwind CSS and Radix UI components, 9) Integration with the existing theme system for dark/light mode support, 10) Proper TypeScript types for all profile-related data structures.",
+        "testStrategy": "Verify implementation through: 1) Unit tests for profile form validation and data transformation functions, 2) Integration tests for profile API endpoints including authentication checks, 3) End-to-end tests using Playwright to simulate complete user profile update workflows, 4) Test profile data persistence across browser sessions and page refreshes, 5) Verify email preference changes are properly saved and reflected in notification behavior, 6) Test form validation with invalid inputs (empty names, invalid email formats), 7) Ensure profile updates work correctly in both light and dark themes, 8) Test responsive design on mobile and desktop viewports, 9) Verify only authenticated users can access profile management, 10) Test optimistic updates and error recovery scenarios with network failures.",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-09-27T02:54:31.738Z",
+      "updated": "2025-09-27T02:54:57.373Z",
+      "description": "=Main development tasks for FocusFlow productivity tracker"
+    }
+  }
+}

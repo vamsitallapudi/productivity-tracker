@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "initialized": true,
+  "lastUpdated": "2025-01-27T00:00:00.000Z",
+  "project": {
+    "name": "FocusFlow Productivity Tracker",
+    "initialized": true,
+    "lastAnalysis": null
+  },
+  "tasks": {
+    "total": 0,
+    "completed": 0,
+    "active": 0,
+    "tags": []
+  },
+  "statistics": {
+    "totalExecutionTime": 0,
+    "successfulTasks": 0,
+    "failedTasks": 0,
+    "averageTaskDuration": 0
+  },
+  "runtime": {
+    "currentModel": "claude-3-5-sonnet-20241022",
+    "currentProvider": "anthropic",
+    "sessionStartTime": null,
+    "lastCommand": null
+  },
+  "environment": {
+    "nodeVersion": null,
+    "npmVersion": null,
+    "operatingSystem": null,
+    "projectRoot": "/Users/vamsitallapudi/Documents/proj/productivity-tracker"
+  },
+  "currentTag": "development",
+  "lastSwitched": "2025-09-27T02:54:35.903Z",
+  "branchTagMapping": {},
+  "migrationNoticeShown": false
+}

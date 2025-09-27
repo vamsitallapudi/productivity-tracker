@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { unstable_noStore as noStore } from 'next/cache'
 
 // Force dynamic rendering
@@ -61,7 +61,7 @@ import {
 import { Progress } from "@/components/ui/progress"
 
 // Calculate real metrics from sessions
-const calculateMetrics = (sessions: Session[]) => {
+const calculateMetrics = (sessions: Session[], period: string) => {
   const totalHours = sessions.reduce((sum, session) => sum + (session.duration_minutes / 60), 0)
   const avgEfficiency = sessions.length > 0 
     ? Math.round(sessions.reduce((sum, session) => sum + session.efficiency_percentage, 0) / sessions.length)
@@ -91,9 +91,9 @@ const calculateMetrics = (sessions: Session[]) => {
       icon: CheckCircle 
     },
     { 
-      label: "Weekly Goal", 
-      value: `${Math.round((totalHours / 40) * 100)}%`, 
-      change: "+" + Math.round((totalHours / 40) * 100) + "%", 
+      label: period === 'Today' ? 'Daily Goal' : 'Weekly Goal', 
+      value: `${Math.round((totalHours / (period === 'Today' ? 4 : 40)) * 100)}%`, 
+      change: "+" + Math.round((totalHours / (period === 'Today' ? 4 : 40)) * 100) + "%", 
       trend: "up", 
       icon: Zap 
     },
@@ -306,6 +306,11 @@ export default function ProductivityDashboard() {
   const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [shouldPlaySound, setShouldPlaySound] = useState(false)
   const [isZenMode, setIsZenMode] = useState(false)
+  // Target end timestamp in ms to align countdown with wall clock
+  const [targetEndTime, setTargetEndTime] = useState<number | null>(null)
+  
+  // Ref to track current timer state without causing re-renders
+  const timerRef = useRef({ minutes: 0, seconds: 0 })
 
   // Persist active session across refresh
   type ActiveSession = {
@@ -315,6 +320,8 @@ export default function ProductivityDashboard() {
     isRunning: boolean
     startedAt: number
     lastUpdated: number
+    // Optional: when present and isRunning, drive remaining time from this wall-clock
+    targetEndTime?: number
   }
   const ACTIVE_SESSION_KEY = 'activeSessionV1'
   const THEME_KEY = 'themeV1'
@@ -461,12 +468,20 @@ export default function ProductivityDashboard() {
         setInitialDuration(restored.initialDuration)
         // Restore the original session start time
         setSessionStartTime(new Date(restored.startedAt))
+        // Restore target end if present
+        if (typeof restored.targetEndTime === 'number') {
+          setTargetEndTime(restored.targetEndTime)
+        }
         
         // Adjust remaining based on elapsed time if running
         let remaining = restored.remainingSeconds
         if (restored.isRunning) {
-          const elapsed = Math.floor((Date.now() - restored.lastUpdated) / 1000)
-          remaining = Math.max(0, remaining - elapsed)
+          if (typeof restored.targetEndTime === 'number') {
+            remaining = Math.max(0, Math.floor((restored.targetEndTime - Date.now()) / 1000))
+          } else {
+            const elapsed = Math.floor((Date.now() - restored.lastUpdated) / 1000)
+            remaining = Math.max(0, remaining - elapsed)
+          }
         }
         
         // Check if timer has completed during restoration
@@ -541,48 +556,101 @@ export default function ProductivityDashboard() {
     }
   }, [isClient, isTimerRunning, timerMinutes, timerSeconds])
 
-  // Timer countdown effect
+  // Update timer ref when state changes
+  useEffect(() => {
+    timerRef.current = { minutes: timerMinutes, seconds: timerSeconds }
+  }, [timerMinutes, timerSeconds])
+
+  // Timer countdown effect - drift-corrected to wall clock and background-friendly
   useEffect(() => {
     if (!isClient) return
 
-    let interval: NodeJS.Timeout | null = null
+    let timeoutId: NodeJS.Timeout | null = null
+
+    const tick = () => {
+      // Compute remaining from target end when available
+      let remainingSecondsCalc: number
+      if (typeof targetEndTime === 'number') {
+        remainingSecondsCalc = Math.max(0, Math.floor((targetEndTime - Date.now()) / 1000))
+      } else {
+        const { minutes, seconds } = timerRef.current
+        remainingSecondsCalc = Math.max(0, minutes * 60 + seconds - 1)
+      }
+
+      if (!isTimerRunning) return
+
+      if (remainingSecondsCalc <= 0) {
+        setIsTimerRunning(false)
+        setShouldPlaySound(true)
+        if (typeof window !== 'undefined') {
+          playBeepSound()
+        }
+        handleSessionComplete()
+        return
+      }
+
+      const newMinutes = Math.floor(remainingSecondsCalc / 60)
+      const newSeconds = remainingSecondsCalc % 60
+      setTimerMinutes(newMinutes)
+      setTimerSeconds(newSeconds)
+
+      // Persist
+      saveActiveSession({
+        taskName: currentTask,
+        initialDuration,
+        remainingSeconds: remainingSecondsCalc,
+        isRunning: true,
+        startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
+        lastUpdated: Date.now(),
+        targetEndTime: typeof targetEndTime === 'number' ? targetEndTime : undefined,
+      })
+
+      // Schedule next tick aligned to next exact second boundary to avoid drift
+      const now = Date.now()
+      const delayToNextSecond = 1000 - (now % 1000) + 5 // slight buffer
+      timeoutId = setTimeout(tick, delayToNextSecond)
+    }
 
     if (isTimerRunning && (timerMinutes > 0 || timerSeconds > 0)) {
-      interval = setInterval(() => {
-        if (timerSeconds > 0) {
-          setTimerSeconds(timerSeconds - 1)
-        } else if (timerMinutes > 0) {
-          setTimerMinutes(timerMinutes - 1)
-          setTimerSeconds(59)
-        } else {
-          // Timer finished
-          setIsTimerRunning(false)
-          setShouldPlaySound(true) // Trigger sound
-          // Also play fallback beep sound
-          if (typeof window !== 'undefined') {
-            playBeepSound()
-          }
-          handleSessionComplete()
-        }
-        // Persist tick
-        const remaining = (timerMinutes * 60 + timerSeconds) - 1
-        saveActiveSession({
-          taskName: currentTask,
-          initialDuration,
-          remainingSeconds: Math.max(0, remaining),
-          isRunning: true,
-          startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
-          lastUpdated: Date.now(),
-        })
-      }, 1000)
+      // Start quickly aligned to the next second
+      const now = Date.now()
+      const delayToNextSecond = 1000 - (now % 1000) + 5
+      timeoutId = setTimeout(tick, delayToNextSecond)
     }
 
-    return () => {
-      if (interval) {
-        clearInterval(interval)
+    const handleVisibility = () => {
+      if (document.hidden) {
+        // Allow timers to be throttled in background; we will resync on show
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+      } else {
+        // Resync immediately when tab becomes visible
+        if (isTimerRunning) {
+          // Force an immediate recompute and schedule next aligned tick
+          const remaining = typeof targetEndTime === 'number'
+            ? Math.max(0, Math.floor((targetEndTime - Date.now()) / 1000))
+            : timerMinutes * 60 + timerSeconds
+          setTimerMinutes(Math.floor(remaining / 60))
+          setTimerSeconds(remaining % 60)
+          if (timeoutId) clearTimeout(timeoutId)
+          const now = Date.now()
+          const delayToNextSecond = 1000 - (now % 1000) + 5
+          timeoutId = setTimeout(tick, delayToNextSecond)
+        }
       }
     }
-  }, [isTimerRunning, timerMinutes, timerSeconds, isClient])
+
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [isTimerRunning, isClient, currentTask, initialDuration, sessionStartTime, targetEndTime, timerMinutes, timerSeconds])
 
   useEffect(() => {
     async function fetchRecentSessions() {
@@ -624,6 +692,7 @@ export default function ProductivityDashboard() {
     setIsSessionPaused(true) // Mark as paused
     // Save paused state
     const remaining = timerMinutes * 60 + timerSeconds
+    setTargetEndTime(null)
     saveActiveSession({
       taskName: currentTask,
       initialDuration,
@@ -631,6 +700,7 @@ export default function ProductivityDashboard() {
       isRunning: false,
       startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
       lastUpdated: Date.now(),
+      targetEndTime: undefined,
     })
   }
 
@@ -639,6 +709,8 @@ export default function ProductivityDashboard() {
     setIsSessionPaused(false) // No longer paused
     // Save running state
     const remaining = timerMinutes * 60 + timerSeconds
+    const newTargetEnd = Date.now() + remaining * 1000
+    setTargetEndTime(newTargetEnd)
     saveActiveSession({
       taskName: currentTask,
       initialDuration,
@@ -646,6 +718,7 @@ export default function ProductivityDashboard() {
       isRunning: true,
       startedAt: sessionStartTime ? sessionStartTime.getTime() : Date.now(),
       lastUpdated: Date.now(),
+      targetEndTime: newTargetEnd,
     })
   }
   const resetTimer = () => {
@@ -656,6 +729,7 @@ export default function ProductivityDashboard() {
     setCurrentTask(lastUsedTask || "DSA")
     setSessionStartTime(null)
     setIsSessionPaused(false) // Reset paused state
+    setTargetEndTime(null)
     saveActiveSession(null)
   }
 
@@ -669,6 +743,8 @@ export default function ProductivityDashboard() {
     setSessionStartTime(new Date())
     setIsTimerRunning(true)
     setIsSessionPaused(false) // Starting fresh session, not paused
+    const endTs = Date.now() + duration * 60 * 1000
+    setTargetEndTime(endTs)
 
     // Save as last used task
     saveLastUsedTask(taskName)
@@ -682,6 +758,7 @@ export default function ProductivityDashboard() {
       isRunning: true,
       startedAt: Date.now(),
       lastUpdated: Date.now(),
+      targetEndTime: endTs,
     })
   }
 
@@ -695,6 +772,7 @@ export default function ProductivityDashboard() {
     setTimerMinutes(0)
     setTimerSeconds(0)
     setIsSessionPaused(false) // Clear paused state
+    setTargetEndTime(null)
     
     // Clear the persisted active session immediately
     saveActiveSession(null)
@@ -1022,7 +1100,7 @@ export default function ProductivityDashboard() {
 
             {/* Metrics Overview */}
             <div className="grid grid-cols-4 gap-6 mb-8">
-              {calculateMetrics(filterSessionsByPeriod(recentSessions, selectedPeriod)).map((metric, index) => (
+              {calculateMetrics(filterSessionsByPeriod(recentSessions, selectedPeriod), selectedPeriod).map((metric, index) => (
                 <Card key={index} className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
                   <CardContent className="p-6">
                     <div className="flex items-center justify-between mb-4">
@@ -1193,16 +1271,20 @@ export default function ProductivityDashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Today's Progress */}
+                {/* Today's Progress / Daily Goal */}
                 <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
                   <CardHeader className="pb-4">
-                    <CardTitle className="text-lg font-semibold dark:text-white">{selectedPeriod}'s Progress</CardTitle>
+                    <CardTitle className="text-lg font-semibold dark:text-white">
+                      {selectedPeriod === 'Today' ? 'Daily Goal' : `${selectedPeriod}'s Progress`}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-600 dark:text-gray-400">Daily Goal</span>
-                        <span className="text-sm font-medium dark:text-white">6 hours</span>
+                        <span className="text-sm font-medium dark:text-white">
+                          {selectedPeriod === 'Today' ? '4 hours' : '6 hours'}
+                        </span>
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-gray-600 dark:text-gray-400">Completed</span>
@@ -1211,13 +1293,19 @@ export default function ProductivityDashboard() {
                         </span>
                       </div>
                       <Progress 
-                        value={Math.min(100, Math.round((filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) / 6) * 100))} 
+                        value={Math.min(100, Math.round((
+                          filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + (session.duration_minutes / 60), 0) /
+                          (selectedPeriod === 'Today' ? 4 : 6)
+                        ) * 100))} 
                         className="h-2" 
                       />
                       <div className="text-center">
                         <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
                           {filterSessionsByPeriod(recentSessions, selectedPeriod).length > 0 
-                            ? Math.round(filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + session.efficiency_percentage, 0) / filterSessionsByPeriod(recentSessions, selectedPeriod).length)
+                            ? Math.round(
+                                filterSessionsByPeriod(recentSessions, selectedPeriod).reduce((sum, session) => sum + session.efficiency_percentage, 0) /
+                                filterSessionsByPeriod(recentSessions, selectedPeriod).length
+                              )
                             : 0}%
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-400">Efficiency Score</div>

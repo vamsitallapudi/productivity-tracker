@@ -34,7 +34,7 @@ export function SessionSetupModal({ isOpen, onClose, onStartSession, defaultTask
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedTask, setSelectedTask] = useState("")
   const [customTask, setCustomTask] = useState("")
-  const [duration, setDuration] = useState(25)
+  const [duration, setDuration] = useState(50)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -151,7 +151,7 @@ export function SessionSetupModal({ isOpen, onClose, onStartSession, defaultTask
     // Reset form
     setSelectedTask("")
     setCustomTask("")
-    setDuration(25)
+    setDuration(50)
   }
 
   if (!isOpen) return null
@@ -239,7 +239,7 @@ export function SessionSetupModal({ isOpen, onClose, onStartSession, defaultTask
             <Button
               onClick={handleStartSession}
               disabled={!selectedTask || (selectedTask === "custom" && !customTask.trim()) || loading}
-              className="flex-1 bg-blue-600 hover:bg-blue-700"
+              className="flex-1 bg-green-600 hover:bg-green-700"
             >
               <Play className="w-4 h-4 mr-2" />
               Start Session
