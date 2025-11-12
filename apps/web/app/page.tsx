@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import Link from "next/link"
 import { unstable_noStore as noStore } from 'next/cache'
 
 // Force dynamic rendering
@@ -9,6 +10,7 @@ noStore()
 import { supabase } from "@/lib/supabase"
 import type { Database } from "@/lib/database.types"
 import { initDatabase, getDatabaseSetupInstructions } from "@/lib/init-database"
+import { StreakSummarySimple } from "../components/streak-summary-simple"
 import {
   Search,
   Bell,
@@ -32,6 +34,7 @@ import {
   ArrowRight,
   Sun,
   Moon,
+  Flame,
 } from "lucide-react"
 import dynamic from "next/dynamic"
 const AreaChart = dynamic(() => import("recharts").then((m) => m.AreaChart), { ssr: false })
@@ -295,6 +298,7 @@ export default function ProductivityDashboard() {
   const [themeInitialized, setThemeInitialized] = useState(false)
   const [recentSessions, setRecentSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
+  const [userId, setUserId] = useState<string | null>(null)
   const [showSessionModal, setShowSessionModal] = useState(false)
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null)
   const [initialDuration, setInitialDuration] = useState(50)
@@ -305,6 +309,64 @@ export default function ProductivityDashboard() {
   const [completedSessionRemainingTime, setCompletedSessionRemainingTime] = useState(0)
   const [isSessionPaused, setIsSessionPaused] = useState(false)
   const [shouldPlaySound, setShouldPlaySound] = useState(false)
+
+  // Request notification permission on component mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(permission => {
+          console.log('Notification permission:', permission)
+        })
+      }
+    }
+  }, [])
+
+  // Function to show desktop notification for timer completion
+  const showTimerCompletionNotification = (taskName: string, duration: number, isManual: boolean = false) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      console.log('Notifications not supported')
+      return
+    }
+
+    if (Notification.permission === 'granted') {
+      const title = isManual ? 'Focus Session Completed!' : 'Timer Finished!'
+      const body = isManual 
+        ? `You completed your ${taskName} session early. Great job!`
+        : `🎉 Well done! You completed ${duration} minutes of ${taskName}.`
+      
+      const notification = new Notification(title, {
+        body,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: 'timer-completion', // Replace previous notifications
+        requireInteraction: false,
+        silent: false
+      })
+
+      // Auto-close after 5 seconds
+      setTimeout(() => {
+        notification.close()
+      }, 5000)
+
+      // Optional: Handle click to focus the tab
+      notification.onclick = () => {
+        window.focus()
+        notification.close()
+      }
+
+      console.log('🔔 Desktop notification shown:', title)
+    } else if (Notification.permission === 'default') {
+      // Request permission again
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          // Retry showing notification
+          showTimerCompletionNotification(taskName, duration, isManual)
+        }
+      })
+    } else {
+      console.log('Notifications blocked by user')
+    }
+  }
   const [isZenMode, setIsZenMode] = useState(false)
   // Target end timestamp in ms to align countdown with wall clock
   const [targetEndTime, setTargetEndTime] = useState<number | null>(null)
@@ -544,6 +606,9 @@ export default function ProductivityDashboard() {
         playBeepSound()
       }
       
+      // Show desktop notification for natural completion
+      showTimerCompletionNotification(currentTask, initialDuration, false)
+      
       // For natural completion, remaining time is 0
       setCompletedSessionRemainingTime(0)
       setIsSessionPaused(false) // Clear paused state
@@ -585,6 +650,8 @@ export default function ProductivityDashboard() {
         if (typeof window !== 'undefined') {
           playBeepSound()
         }
+        // Show desktop notification for natural completion (timer tick reached 0)
+        showTimerCompletionNotification(currentTask, initialDuration, false)
         handleSessionComplete()
         return
       }
@@ -655,6 +722,16 @@ export default function ProductivityDashboard() {
   useEffect(() => {
     async function fetchRecentSessions() {
       try {
+        // First, get the user ID
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', 'alex@example.com')
+          .single()
+
+        if (userError) throw userError
+        setUserId(userData.id)
+
         // Fetch all sessions for charts and metrics
         const { data: allSessions, error: allError } = await supabase
           .from('sessions')
@@ -762,6 +839,14 @@ export default function ProductivityDashboard() {
     })
   }
 
+  const handleManualSessionComplete = async () => {
+    // Show desktop notification for manual completion
+    showTimerCompletionNotification(currentTask, initialDuration, true)
+    
+    // Call the main completion handler
+    handleSessionComplete()
+  }
+
   const handleSessionComplete = async () => {
     // Capture remaining time before resetting
     const remainingTime = timerMinutes * 60 + timerSeconds
@@ -779,6 +864,115 @@ export default function ProductivityDashboard() {
     
     // Show efficiency modal
     setShowEfficiencyModal(true)
+  }
+
+  // Helper function to map task names to streak names
+  const getStreakNameFromTask = (taskName: string): string | null => {
+    const taskLower = taskName.toLowerCase()
+    
+    // Map task names to streak names based on keywords
+    if (taskLower.includes('dsa') || 
+        taskLower.includes('data structure') || 
+        taskLower.includes('algorithm') ||
+        taskLower.includes('leetcode') ||
+        taskLower.includes('coding problem') ||
+        taskLower.includes('programming problem')) {
+      return 'DSA Practice'
+    }
+    if (taskLower.includes('exercise') || 
+        taskLower.includes('workout') || 
+        taskLower.includes('fitness') ||
+        taskLower.includes('gym') ||
+        taskLower.includes('run') ||
+        taskLower.includes('cardio')) {
+      return 'Exercise'
+    }
+    if (taskLower.includes('learning') || 
+        taskLower.includes('study') || 
+        taskLower.includes('course') || 
+        taskLower.includes('eber') ||
+        taskLower.includes('read') ||
+        taskLower.includes('research') ||
+        taskLower.includes('tutorial')) {
+      return 'Learning Streak'
+    }
+    if (taskLower.includes('cook') || 
+        taskLower.includes('meal') || 
+        taskLower.includes('recipe') ||
+        taskLower.includes('kitchen') ||
+        taskLower.includes('bake') ||
+        taskLower.includes('food prep')) {
+      return 'Cooking'
+    }
+    
+    return null // No matching streak type
+  }
+
+  // Helper function to auto-complete streak when session is completed
+  const handleStreakAutoComplete = async (userId: string, taskName: string) => {
+    console.log('🎯 Starting streak auto-completion check:', { userId, taskName })
+    
+    const streakName = getStreakNameFromTask(taskName)
+    if (!streakName) {
+      console.log('❌ No matching streak found for task:', taskName)
+      return
+    }
+
+    try {
+      console.log('🔍 Checking if streak should be auto-completed:', { taskName, streakName, userId })
+      
+      // Check if we already completed this streak today
+      const today = new Date().toISOString().split('T')[0]
+      
+      // Get the streak ID for this user and streak name
+      console.log('📊 Querying database for streak:', { userId, streakName, today })
+      const { data: streakData, error: streakError } = await supabase
+        .from('user_streaks')
+        .select('id, current_streak, last_activity_date, name')
+        .eq('user_id', userId)
+        .eq('name', streakName)
+        .eq('is_active', true)
+        .single()
+
+      console.log('📊 Database query result:', { streakData, streakError })
+
+      if (streakError || !streakData) {
+        console.log('❌ No active streak found for:', streakName, 'Error:', streakError)
+        
+        // Let's also check what streaks DO exist for this user
+        const { data: allStreaks, error: allStreaksError } = await supabase
+          .from('user_streaks')
+          .select('id, name, is_active')
+          .eq('user_id', userId)
+        
+        console.log('📋 All streaks for user:', { allStreaks, allStreaksError })
+        return
+      }
+
+      // Check if already completed today
+      if (streakData.last_activity_date === today) {
+        console.log('⏰ Streak already completed today:', streakName, 'Last activity:', streakData.last_activity_date)
+        return
+      }
+
+      // Auto-complete the streak
+      console.log('✅ Auto-completing streak:', streakName, 'Streak ID:', streakData.id)
+      const response = await fetch(`/api/streaks/${streakData.id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log('🎉 Streak auto-completed successfully:', result.message)
+      } else {
+        const errorText = await response.text()
+        console.error('❌ Failed to auto-complete streak:', { status: response.status, error: errorText })
+      }
+    } catch (error) {
+      console.error('💥 Error in streak auto-completion:', error)
+    }
   }
 
   const handleSaveSession = async (efficiency: number) => {
@@ -808,6 +1002,7 @@ export default function ProductivityDashboard() {
       }
 
       console.log('User found:', userData)
+      const userId = (userData as any).id
 
       // Use the original session start time if available, otherwise use current time
       const sessionStartTimeToUse = sessionStartTime || new Date()
@@ -816,7 +1011,7 @@ export default function ProductivityDashboard() {
       const { error } = await supabase
         .from('sessions')
         .insert({
-          user_id: (userData as any).id,
+          user_id: userId,
           task: currentTask,
           duration_minutes: actualDuration,
           efficiency_percentage: efficiency,
@@ -829,6 +1024,10 @@ export default function ProductivityDashboard() {
       }
 
       console.log('Session saved successfully')
+
+      // Auto-complete relevant streak if this is the first session of this type today
+      console.log('🚀 Initiating streak auto-completion for session:', { userId, currentTask })
+      await handleStreakAutoComplete(userId, currentTask)
 
       // Refresh all sessions
       const { data: allSessions, error: fetchError } = await supabase
@@ -1019,6 +1218,13 @@ export default function ProductivityDashboard() {
                   <Timer className="w-4 h-4 mr-3" />
                   Focus Timer
                 </Button>
+                <Link
+                  href="/streaks"
+                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <Flame className="w-4 h-4 mr-3" />
+                  Streaks
+                </Link>
                 <Button
                   variant="ghost"
                   className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
@@ -1193,6 +1399,10 @@ export default function ProductivityDashboard() {
 
               {/* Right Sidebar */}
               <div className="space-y-6">
+                {/* Streak Summary */}
+                {userId && (
+                  <StreakSummarySimple userId={userId} />
+                )}
                 {/* Pomodoro Timer */}
                 <Card className="border-gray-200 dark:border-gray-700 dark:bg-gray-900">
                   <CardHeader className="pb-4 flex items-start justify-between">
@@ -1251,7 +1461,7 @@ export default function ProductivityDashboard() {
                             Pause
                           </Button>
                           <Button
-                            onClick={handleSessionComplete}
+                            onClick={handleManualSessionComplete}
                             className="flex-1 bg-red-600 hover:bg-red-700"
                           >
                             <CheckCircle className="w-4 h-4 mr-2" />

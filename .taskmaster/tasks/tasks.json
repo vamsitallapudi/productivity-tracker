@@ -7,15 +7,131 @@
         "description": "Implement user profile management functionality allowing users to view and update their display name and email notification preferences within the FocusFlow application.",
         "details": "Create a comprehensive user profile management system that includes: 1) Database schema updates to add user profile fields (display_name, email_preferences) to the existing users table, 2) Backend API endpoints for fetching and updating user profile data, 3) Frontend profile page component with form validation using React Hook Form and Zod, 4) Integration with existing authentication system to ensure users can only modify their own profiles, 5) Email preference settings for notifications (session reminders, weekly summaries, achievement notifications), 6) Profile avatar upload capability with image optimization and storage, 7) Form state management with optimistic updates and error handling, 8) Responsive design consistent with existing FocusFlow UI patterns using Tailwind CSS and Radix UI components, 9) Integration with the existing theme system for dark/light mode support, 10) Proper TypeScript types for all profile-related data structures.",
         "testStrategy": "Verify implementation through: 1) Unit tests for profile form validation and data transformation functions, 2) Integration tests for profile API endpoints including authentication checks, 3) End-to-end tests using Playwright to simulate complete user profile update workflows, 4) Test profile data persistence across browser sessions and page refreshes, 5) Verify email preference changes are properly saved and reflected in notification behavior, 6) Test form validation with invalid inputs (empty names, invalid email formats), 7) Ensure profile updates work correctly in both light and dark themes, 8) Test responsive design on mobile and desktop viewports, 9) Verify only authenticated users can access profile management, 10) Test optimistic updates and error recovery scenarios with network failures.",
-        "status": "pending",
+        "status": "done",
         "dependencies": [],
         "priority": "high",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update database schema for user profile fields",
+            "description": "Extend the existing users table in Supabase to include display_name and email_preferences columns with appropriate data types and constraints.",
+            "dependencies": [],
+            "details": "Create a migration script to add display_name (VARCHAR) and email_preferences (JSONB) columns to the users table. The email_preferences should store an object with boolean flags for session_reminders, weekly_summaries, and achievement_notifications. Update the supabase-schema.sql file with these changes and provide migration instructions.",
+            "status": "done",
+            "testStrategy": "Test schema changes by verifying column creation, data type validation, and default values in Supabase dashboard"
+          },
+          {
+            "id": 2,
+            "title": "Create TypeScript types and database client functions",
+            "description": "Define TypeScript interfaces for user profile data and implement Supabase client functions for profile operations.",
+            "dependencies": [],
+            "details": "Update lib/database.types.ts to include the new profile fields. Create profile-specific functions in the Supabase client for fetching and updating user profiles, including proper error handling and type safety. Ensure functions integrate with existing authentication patterns.",
+            "status": "done",
+            "testStrategy": "Unit tests for type validation and database function error handling scenarios"
+          },
+          {
+            "id": 3,
+            "title": "Implement profile API endpoints",
+            "description": "Create Next.js API routes for fetching and updating user profile data with proper authentication and validation.",
+            "dependencies": [],
+            "details": "Create app/api/profile/route.ts with GET and PATCH methods. Implement authentication middleware to ensure users can only access their own profiles. Add request validation using Zod schemas for profile updates. Include proper error responses and status codes.",
+            "status": "done",
+            "testStrategy": "Integration tests for API endpoints covering authentication, validation, and error scenarios"
+          },
+          {
+            "id": 4,
+            "title": "Build profile management UI components",
+            "description": "Create the profile page component with form validation, responsive design, and theme integration using existing FocusFlow design patterns.",
+            "dependencies": [],
+            "details": "Create app/profile/page.tsx with a form using React Hook Form and Zod validation. Include fields for display name and email preferences with toggle switches. Implement optimistic updates and error handling. Use Radix UI components and Tailwind CSS following existing patterns. Ensure dark/light theme compatibility.",
+            "status": "done",
+            "testStrategy": "Component tests for form validation, state management, and responsive design across different screen sizes"
+          },
+          {
+            "id": 5,
+            "title": "Integrate profile management with navigation and existing user flows",
+            "description": "Add profile page to navigation menu, update user display throughout the app, and ensure seamless integration with existing authentication flows.",
+            "dependencies": [],
+            "details": "Add profile link to the sidebar navigation in dashboard-layout.tsx. Update user display components to show the display_name when available. Modify the header user menu to include profile access. Ensure profile data is properly cached and updated across the application when changes are made.",
+            "status": "done",
+            "testStrategy": "End-to-end tests using Playwright to verify complete user profile management workflows including navigation, form submission, and data persistence"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Design and implement multiple streak types system with grid view and management capabilities",
+        "description": "Create a comprehensive multi-streak tracking system supporting various streak types (Exercise, EBER, Interview Prep, DSA, Cooking, Sthitha Pragna, etc.) with grid-based visual interface, individual streak management, icon customization, and enhanced user control over streak creation and editing.",
+        "details": "Implement a complete multiple streak tracking system with the following components: 1) Database schema updates supporting multiple streak types per user with individual tracking - extend user_streaks table to include name, icon, color, category, and description fields for custom streak identification, 2) Predefined streak types system with 7+ default types (Exercise, EBER, Tracked Streak, Interview Prep, DSA Streak, Cooking, Sthitha Pragna) each with unique icons and color schemes, 3) Grid-based streak dashboard displaying all user streaks in card/tile format with icons, current counters, and quick status indicators, 4) Streak management interface allowing users to add new streaks, edit existing streak names/icons, delete streaks, and customize streak properties, 5) Icon selection system with Lucide React icons categorized by domain (health, learning, career, lifestyle, etc.), 6) Enhanced streak service supporting multiple concurrent streaks with independent tracking and statistics, 7) Individual streak detail views with dedicated analytics, calendar heatmaps, and achievement tracking per streak type, 8) Backend API endpoints supporting CRUD operations for streak management (create, read, update, delete individual streaks), 9) Responsive grid layout adapting from 1 column (mobile) to 4+ columns (desktop) with drag-and-drop reordering capabilities, 10) Integration with existing timer system allowing users to assign sessions to specific streak types during session setup.",
+        "testStrategy": "Verify implementation through comprehensive testing: 1) Unit tests for multi-streak calculation algorithms, streak type management, icon/color handling, and CRUD operations, 2) Integration tests for enhanced streak API endpoints including streak creation, editing, deletion, and type-specific tracking, 3) Database tests ensuring proper multi-streak data persistence, unique constraints per user/type, and cascading operations, 4) End-to-end tests using Playwright simulating complete multi-streak workflows including grid navigation, streak creation/editing, session assignment to specific streaks, and cross-streak analytics, 5) Performance tests for handling multiple concurrent streaks per user and efficient grid rendering with large streak collections, 6) Visual regression tests for grid layouts, responsive design across devices, icon rendering, and streak management interfaces, 7) User acceptance testing validating grid usability, streak management workflow efficiency, and multi-streak motivation effectiveness, 8) Accessibility testing for screen readers, keyboard navigation in grid layout, and color contrast for different streak themes.",
+        "status": "pending",
+        "dependencies": [
+          1
+        ],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Design and implement enhanced database schema for multiple streak types",
+            "description": "Create the database tables and schema updates required to support multiple streak types per user with individual customization including names, icons, colors, and tracking metadata.",
+            "dependencies": [],
+            "details": "Create SQL migration files to add/enhance three tables: 1) Enhanced user_streaks table with fields (id, user_id, name, streak_type_id, icon, color, category, description, current_streak, longest_streak, last_activity_date, streak_start_date, freeze_count, is_active, display_order, created_at, updated_at) with unique constraint on (user_id, name), 2) New streak_types table with predefined types (id, name, default_icon, default_color, category, description, is_default) for Exercise, EBER, Interview Prep, DSA, Cooking, Sthitha Pragna, etc., 3) Enhanced daily_activities table with streak_id foreign key to track activities per specific streak rather than user-wide, 4) streak_achievements table updated to include streak_id for streak-specific achievements. Add comprehensive foreign key constraints, indexes for performance (user_id, streak_id, activity_date), and update database.types.ts with enhanced TypeScript interfaces.",
+            "status": "pending",
+            "testStrategy": "Verify enhanced database schema through migration tests, ensure multiple streaks per user work correctly, validate foreign key constraints, test unique constraints, and verify data types for new customization fields."
+          },
+          {
+            "id": 2,
+            "title": "Create enhanced backend API endpoints for multi-streak management and CRUD operations",
+            "description": "Implement comprehensive API routes to handle multiple streak types, CRUD operations for streak management, activity tracking per streak, and enhanced streak calculation logic.",
+            "dependencies": [
+              "2.1"
+            ],
+            "details": "Create enhanced API endpoints in apps/web/app/api/streaks/ directory: 1) GET /api/streaks to fetch all user streaks for grid display, 2) POST /api/streaks to create new custom streaks with name, icon, color selection, 3) PUT /api/streaks/[id] to update existing streak properties (name, icon, color, description), 4) DELETE /api/streaks/[id] to remove streaks with cascade handling, 5) POST /api/streaks/[id]/activity to record activities for specific streaks, 6) GET /api/streaks/[id]/stats to fetch individual streak analytics and calendar data, 7) POST /api/streaks/[id]/freeze for streak-specific freeze functionality, 8) GET /api/streak-types to fetch predefined streak types for selection, 9) POST /api/streaks/reorder to handle drag-and-drop ordering. Implement enhanced calculation algorithms supporting multiple concurrent streaks, individual streak statistics, and cross-streak analytics dashboard.",
+            "status": "pending",
+            "testStrategy": "Unit tests for multi-streak calculation logic, comprehensive API endpoint tests for CRUD operations, integration tests ensuring data consistency across multiple streaks, edge case testing for concurrent streak updates, and performance testing with multiple active streaks per user."
+          },
+          {
+            "id": 3,
+            "title": "Build enhanced multi-streak service and timer system integration with streak selection",
+            "description": "Create enhanced streak service supporting multiple concurrent streaks and integrate with timer system allowing users to assign sessions to specific streak types during session setup.",
+            "dependencies": [
+              "2.1",
+              "2.2"
+            ],
+            "details": "Enhance apps/web/lib/streak-service.ts with multi-streak functions: 1) createStreak(), updateStreak(), deleteStreak() for CRUD operations, 2) getAllUserStreaks() for grid display data, 3) recordActivityForStreak(streakId) for specific streak tracking, 4) getStreakStats(streakId) for individual analytics, 5) Multi-streak offline sync and localStorage management. Modify session setup modal (session-setup-modal.tsx) to include streak selection dropdown allowing users to assign upcoming sessions to specific streaks. Update timer completion logic in page.tsx to record activities for the selected streak type. Implement atomic multi-streak updates, concurrent session handling, and cross-streak statistics aggregation. Add predefined streak type management and user streak initialization workflow.",
+            "status": "pending",
+            "testStrategy": "Unit tests for enhanced multi-streak service functions, integration tests with timer system including streak selection workflow, test multi-streak persistence and sync, validate concurrent streak updates, and test streak assignment during session setup."
+          },
+          {
+            "id": 4,
+            "title": "Develop grid-based streak dashboard with individual streak cards and management interface",
+            "description": "Create a comprehensive grid-based streak dashboard displaying all user streaks as individual cards with icons, counters, management controls, and responsive layout adapting from mobile to desktop.",
+            "dependencies": [
+              "2.2",
+              "2.3"
+            ],
+            "details": "Create enhanced components/streak-grid-dashboard.tsx with: 1) Responsive grid layout (1 col mobile → 2 col tablet → 3-4 col desktop) displaying streak cards, 2) Individual streak cards showing icon, name, current streak count, color theme, and quick action buttons (edit, delete, view details), 3) 'Add New Streak' card with plus icon for creating streaks, 4) Streak creation modal with predefined type selection (Exercise, EBER, Interview Prep, DSA, Cooking, Sthitha Pragna) and custom options, 5) Streak editing modal with name/icon/color customization using Lucide React icon picker, 6) Individual streak detail view with dedicated calendar heatmap, progress rings, statistics, and achievements, 7) Drag-and-drop reordering functionality for streak cards, 8) Search/filter functionality for large streak collections, 9) Animated transitions for card interactions and state changes, 10) Empty state design for users with no streaks. Implement streak card hover effects, loading states, and error handling for all CRUD operations.",
+            "status": "pending",
+            "testStrategy": "Component testing for grid layout responsiveness, streak card interactions, CRUD operation flows, drag-and-drop functionality, icon picker component, modal workflows, search/filter logic, and accessibility compliance for keyboard navigation and screen readers."
+          },
+          {
+            "id": 5,
+            "title": "Implement streak-specific achievement system and enhanced motivational features",
+            "description": "Build comprehensive achievement system supporting individual streak achievements, cross-streak milestones, streak preservation features, and enhanced motivational elements for multiple concurrent streaks.",
+            "dependencies": [
+              "2.3",
+              "2.4"
+            ],
+            "details": "Create enhanced achievement system with: 1) Streak-specific achievements for each individual streak type (Exercise 7-day, DSA 30-day, Cooking 100-day milestones), 2) Cross-streak achievements for maintaining multiple streaks simultaneously (Multi-tasker: 3 active streaks, Consistency Master: 5 streaks for 30 days), 3) Enhanced streak preservation features with per-streak freeze tokens, weekend grace periods configurable per streak type, and makeup session options, 4) Motivational dashboard showing achievements across all streaks with filtering by streak type and achievement category, 5) Streak-specific reminder notifications with customizable timing and messages per streak, 6) Social sharing for individual streak achievements and cross-streak milestones with dynamic og:image generation, 7) Achievement unlock animations and celebrations integrated into grid dashboard, 8) Streak recovery suggestions and motivation when specific streaks are broken, 9) Progress tracking toward next achievements visible on streak cards, 10) Achievement rarity system (common, rare, legendary) based on streak difficulty and user base statistics.",
+            "status": "pending",
+            "testStrategy": "Test achievement unlock logic for individual and cross-streak scenarios, validate streak-specific notifications, test social sharing functionality for different achievement types, ensure proper streak preservation workflows across multiple streaks, and verify achievement progress tracking accuracy."
+          }
+        ]
       }
     ],
     "metadata": {
       "created": "2025-09-27T02:54:31.738Z",
-      "updated": "2025-09-27T02:54:57.373Z",
+      "updated": "2025-09-29T04:14:42.992Z",
       "description": "=Main development tasks for FocusFlow productivity tracker"
     }
   }
