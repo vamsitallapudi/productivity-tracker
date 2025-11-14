@@ -5,7 +5,7 @@ import { useState, useEffect } from "react"
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Search, Bell, Home, Workflow, BarChart3, Settings, Users, Database, ArrowRight, User, Flame, Moon, Sun, Clock, Calendar, Target } from "lucide-react"
+import { Search, Bell, Home, Brain, BarChart3, Settings, ArrowRight, Flame, Moon, Sun, Clock, Calendar, Target } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -85,10 +85,10 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <header className="h-16 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg flex items-center justify-center">
-              <Workflow className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+              <Brain className="w-4 h-4 text-white" />
             </div>
-            <span className="font-semibold text-gray-900 dark:text-white">Emmanuel</span>
+            <span className="font-semibold text-gray-900 dark:text-white">FocusFlow</span>
           </div>
           <div className="text-sm text-gray-500 dark:text-gray-400">
             <span>Dashboard</span> <span className="mx-1">/</span>

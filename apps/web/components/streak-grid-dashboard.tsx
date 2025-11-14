@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -122,11 +122,11 @@ const COLOR_SCHEMES = {
   }
 } as const
 
-// Individual streak card component with elegant design
-const StreakCardComponent: React.FC<StreakCardComponentProps> = ({ 
-  streak, 
-  onEdit, 
-  onDelete, 
+// Individual streak card component with elegant design - memoized to prevent unnecessary re-renders
+const StreakCardComponent = memo<StreakCardComponentProps>(({
+  streak,
+  onEdit,
+  onDelete,
   onView,
   onComplete,
   onReset
@@ -386,10 +386,12 @@ const StreakCardComponent: React.FC<StreakCardComponentProps> = ({
       `} />
     </Card>
   )
-}
+})
 
-// Add new streak card with elegant design
-const AddStreakCard: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+StreakCardComponent.displayName = 'StreakCardComponent'
+
+// Add new streak card with elegant design - memoized
+const AddStreakCard = memo<{ onClick: () => void }>(({ onClick }) => {
   return (
     <Card 
       className="
@@ -441,7 +443,9 @@ const AddStreakCard: React.FC<{ onClick: () => void }> = ({ onClick }) => {
       <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1)]" />
     </Card>
   )
-}
+})
+
+AddStreakCard.displayName = 'AddStreakCard'
 
 // Empty state component with elegant design
 const EmptyState: React.FC<{ onAddStreak: () => void }> = ({ onAddStreak }) => {
@@ -610,7 +614,7 @@ export const StreakGridDashboard: React.FC<StreakGridDashboardProps> = ({
     }
   }
 
-  const handleDeleteStreak = async (streakId: string) => {
+  const handleDeleteStreak = useCallback(async (streakId: string) => {
     if (!confirm('Are you sure you want to delete this streak? This action cannot be undone.')) {
       return
     }
@@ -628,28 +632,28 @@ export const StreakGridDashboard: React.FC<StreakGridDashboardProps> = ({
     } catch (err) {
       console.error('Error deleting streak:', err)
     }
-  }
+  }, [])
 
-  const handleViewStreak = (streakId: string) => {
+  const handleViewStreak = useCallback((streakId: string) => {
     // Navigate to individual streak detail view
     window.location.href = `/streaks/${streakId}`
-  }
+  }, [])
 
-  const handleCompleteStreak = (streakId: string) => {
+  const handleCompleteStreak = useCallback((streakId: string) => {
     const streak = streaks.find(s => s.id === streakId)
     if (streak) {
       setActionStreak(streak)
       setShowCompleteModal(true)
     }
-  }
+  }, [streaks])
 
-  const handleResetStreak = (streakId: string) => {
+  const handleResetStreak = useCallback((streakId: string) => {
     const streak = streaks.find(s => s.id === streakId)
     if (streak) {
       setActionStreak(streak)
       setShowResetModal(true)
     }
-  }
+  }, [streaks])
 
   const confirmCompleteStreak = async () => {
     if (!actionStreak) return
@@ -703,7 +707,7 @@ export const StreakGridDashboard: React.FC<StreakGridDashboardProps> = ({
     }
   }
 
-  const handleEditClick = (streak: StreakCard) => {
+  const handleEditClick = useCallback((streak: StreakCard) => {
     setEditingStreak(streak)
     setCreateForm({
       name: streak.name,
@@ -714,7 +718,7 @@ export const StreakGridDashboard: React.FC<StreakGridDashboardProps> = ({
       description: ""
     })
     setShowEditModal(true)
-  }
+  }, [])
 
   const resetCreateForm = () => {
     setCreateForm({
@@ -742,15 +746,19 @@ export const StreakGridDashboard: React.FC<StreakGridDashboardProps> = ({
     }
   }
 
-  // Filter streaks based on search and category
-  const filteredStreaks = streaks.filter(streak => {
-    const matchesSearch = streak.name.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesCategory = categoryFilter === "all" || streak.category === categoryFilter
-    return matchesSearch && matchesCategory
-  })
+  // Filter streaks based on search and category - memoized for performance
+  const filteredStreaks = useMemo(() => {
+    return streaks.filter(streak => {
+      const matchesSearch = streak.name.toLowerCase().includes(searchQuery.toLowerCase())
+      const matchesCategory = categoryFilter === "all" || streak.category === categoryFilter
+      return matchesSearch && matchesCategory
+    })
+  }, [streaks, searchQuery, categoryFilter])
 
-  // Get unique categories for filter dropdown
-  const categories = Array.from(new Set(streaks.map(s => s.category)))
+  // Get unique categories for filter dropdown - memoized for performance
+  const categories = useMemo(() => {
+    return Array.from(new Set(streaks.map(s => s.category)))
+  }, [streaks])
 
   if (loading) {
     return (

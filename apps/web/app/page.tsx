@@ -1296,9 +1296,12 @@ export default function ProductivityDashboard() {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Button className="bg-blue-600 hover:bg-blue-700">
-                    <Plus className="w-4 h-4 mr-2" />
-                    New Goal
+                  <Button
+                    onClick={() => setShowSessionModal(true)}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    <Play className="w-4 h-4 mr-2" />
+                    Start Session
                   </Button>
                 </div>
               </div>
