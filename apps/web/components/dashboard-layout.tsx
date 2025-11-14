@@ -100,16 +100,21 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
-              placeholder="Search workflows, logs..."
+              placeholder="Search tasks, sessions..."
               className="pl-10 w-80 bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600 focus:bg-white dark:focus:bg-gray-700 dark:text-white"
             />
           </div>
-          <Button variant="ghost" size="icon" className="relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="dark:text-gray-300 dark:hover:text-white"
+          >
+            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </Button>
+          <Button variant="ghost" size="icon" className="relative dark:text-gray-300 dark:hover:text-white">
             <Bell className="w-4 h-4" />
             <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-          </Button>
-          <Button variant="ghost" size="icon" onClick={toggleTheme}>
-            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -120,18 +125,18 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Alex Evans</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
+            <DropdownMenuContent align="end" className="w-56 dark:bg-gray-800 dark:border-gray-700">
+              <DropdownMenuLabel className="dark:text-white">Alex Evans</DropdownMenuLabel>
+              <DropdownMenuSeparator className="dark:border-gray-600" />
+              <DropdownMenuItem className="dark:text-gray-300 dark:hover:bg-gray-700" asChild>
                 <Link href="/profile">Profile</Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
+              <DropdownMenuItem className="dark:text-gray-300 dark:hover:bg-gray-700" asChild>
                 <Link href="/settings">Settings</Link>
               </DropdownMenuItem>
-              <DropdownMenuItem>Support</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>Sign out</DropdownMenuItem>
+              <DropdownMenuItem className="dark:text-gray-300 dark:hover:bg-gray-700">Support</DropdownMenuItem>
+              <DropdownMenuSeparator className="dark:border-gray-600" />
+              <DropdownMenuItem className="dark:text-gray-300 dark:hover:bg-gray-700">Sign out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
