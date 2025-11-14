@@ -152,7 +152,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               <Button
                 size="icon"
                 variant="ghost"
-                className="absolute right-1 top-1/2 transform -translate-y-1/2 w-6 h-6"
+                className="absolute right-1 top-1/2 transform -translate-y-1/2 w-6 h-6 dark:text-gray-400"
               >
                 <ArrowRight className="w-3 h-3" />
               </Button>
@@ -166,7 +166,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                     key={item.name}
                     href={item.href}
                     className={`flex items-center w-full justify-start px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      isActive ? "bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      isActive ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                     }`}
                   >
                     <item.icon className="w-4 h-4 mr-3" />
