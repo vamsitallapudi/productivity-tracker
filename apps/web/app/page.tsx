@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
+import { usePathname } from "next/navigation"
 import { unstable_noStore as noStore } from 'next/cache'
 
 // Force dynamic rendering
@@ -286,7 +287,18 @@ const calculateTrendData = (sessions: Session[], period: string) => {
 
 type Session = Database['public']['Tables']['sessions']['Row']
 
+const navigation = [
+  { name: "Overview", href: "/", icon: Home },
+  { name: "Focus Timer", href: "/focus", icon: Clock },
+  { name: "Streaks", href: "/streaks", icon: Flame },
+  { name: "Analytics", href: "/analytics", icon: BarChart3 },
+  { name: "Schedule", href: "/schedule", icon: Calendar },
+  { name: "Goals", href: "/goals", icon: Target },
+  { name: "Settings", href: "/settings", icon: Settings },
+]
+
 export default function ProductivityDashboard() {
+  const pathname = usePathname()
   const [selectedPeriod, setSelectedPeriod] = useState("This Week")
   const [defaultPeriodSet, setDefaultPeriodSet] = useState(false)
   const [timerMinutes, setTimerMinutes] = useState(50)
@@ -1204,55 +1216,21 @@ export default function ProductivityDashboard() {
               </div>
 
               <nav className="space-y-1">
-                <Button
-                  variant="ghost"
-                  className="flex items-center w-full justify-start bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <Home className="w-4 h-4 mr-3" />
-                  Overview
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <Timer className="w-4 h-4 mr-3" />
-                  Focus Timer
-                </Button>
-                <Link
-                  href="/streaks"
-                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <Flame className="w-4 h-4 mr-3" />
-                  Streaks
-                </Link>
-                <Button
-                  variant="ghost"
-                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <BarChart3 className="w-4 h-4 mr-3" />
-                  Analytics
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <Calendar className="w-4 h-4 mr-3" />
-                  Schedule
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <Target className="w-4 h-4 mr-3" />
-                  Goals
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="flex items-center w-full justify-start text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-2 rounded-md text-sm font-medium"
-                >
-                  <Settings className="w-4 h-4 mr-3" />
-                  Settings
-                </Button>
+                {navigation.map((item) => {
+                  const isActive = pathname === item.href
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={`flex items-center w-full justify-start px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        isActive ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      }`}
+                    >
+                      <item.icon className="w-4 h-4 mr-3" />
+                      {item.name}
+                    </Link>
+                  )
+                })}
               </nav>
             </div>
           </aside>
